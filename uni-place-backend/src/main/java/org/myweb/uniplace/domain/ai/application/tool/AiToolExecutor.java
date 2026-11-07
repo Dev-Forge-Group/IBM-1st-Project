@@ -1,12 +1,12 @@
 package org.myweb.uniplace.domain.ai.application.tool;
 
-import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.myweb.uniplace.domain.user.domain.enums.UserRole;
 import org.myweb.uniplace.domain.user.repository.UserRepository;
 import org.myweb.uniplace.domain.reservation.domain.enums.TourStatus;
 import org.myweb.uniplace.domain.reservation.repository.TourReservationRepository;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,19 +19,21 @@ import java.util.*;
  *
  * [핵심 변경]
  * 기존: 각 UseCase마다 Java 코드로 DB 조회 → 하드코딩된 필터/정렬
- * 변경: LLM이 생성한 SQL을 JPA EntityManager로 직접 실행
+ * 변경: LLM이 생성한 SQL을 읽기 전용 트랜잭션의 JDBC로 직접 실행
  *      → 빌딩/테이블 추가 시 코드 변경 없음
  *      → 복잡한 JOIN, 집계 쿼리도 자연어로 처리 가능
  *
  * [보안]
- * SqlValidator로 SELECT만 허용, 테이블 화이트리스트, 위험 키워드 차단.
+ * SqlValidator로 SELECT 한 문장만 허용하고 위험 키워드를 차단한다.
+ * 어떤 테이블의 어떤 행·컬럼을 읽을 수 있는지는 AiDataContract가 정하고,
+ * AiSqlRewriter가 실행 전에 SQL이 읽는 테이블을 계약이 허용한 파생 테이블로 바꾼다.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AiToolExecutor {
 
-    private final EntityManager em;
+    private final JdbcTemplate jdbcTemplate;
     private final TourReservationRepository tourRepository;
     private final UserRepository userRepository;
 
@@ -85,11 +87,12 @@ public class AiToolExecutor {
             return AiToolResponse.fail("SQL이 전달되지 않았습니다.");
         }
 
-        // SELECT 전용, 위험 키워드 차단 — 어드민도 DDL/DML 금지, 테이블 whitelist는 우회
-        SqlValidator.validateAdmin(sql);
+        // SELECT 전용, 위험 키워드 차단 — 어드민도 DDL/DML 금지. 비밀 테이블·컬럼은 AiDataContract가 막는다.
+        SqlValidator.validate(sql);
+        String contracted = AiSqlRewriter.rewrite(sql, AiDataContract.Audience.ADMIN, userId);
 
         log.info("[AiToolExecutor] SQL실행(어드민): {}", sql.substring(0, Math.min(150, sql.length())));
-        List<Map<String, Object>> rows = runNativeQuery(sql, null);
+        List<Map<String, Object>> rows = runNativeQuery(contracted);
 
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("total", rows.size());
@@ -108,16 +111,17 @@ public class AiToolExecutor {
             return AiToolResponse.fail("SQL이 전달되지 않았습니다.");
         }
 
-        // 보안 검증
+        // 보안 검증: 문장 검사 후, 공개 계약(개인 테이블 거절, 개인·비밀 컬럼 제외)으로 테이블을 바꿔 읽는다.
         SqlValidator.validate(sql);
-
-        // 인증 필요 테이블 접근 시도 차단
-        if (SqlValidator.requiresAuth(sql)) {
+        String contracted;
+        try {
+            contracted = AiSqlRewriter.rewrite(sql, AiDataContract.Audience.PUBLIC, null);
+        } catch (AiAuthRequiredException e) {
             return AiToolResponse.authRequired();
         }
 
         log.info("[AiToolExecutor] SQL실행(공개): {}", sql.substring(0, Math.min(150, sql.length())));
-        List<Map<String, Object>> rows = runNativeQuery(sql, null);
+        List<Map<String, Object>> rows = runNativeQuery(contracted);
 
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("total", rows.size());
@@ -140,21 +144,16 @@ public class AiToolExecutor {
             return AiToolResponse.fail("SQL이 전달되지 않았습니다.");
         }
 
-        // 1단계: 구조 검증 (SELECT 전용, 테이블 화이트리스트, 위험 키워드)
+        // 1단계: 문장 검증 (SELECT 전용, 위험 키워드)
         SqlValidator.validate(sql);
 
-        // 2단계: SQL 내 모든 user_id = '...' 값을 인증된 userId로 강제 치환
-        //         → AI가 타인 userId를 주입하는 취약점 원천 차단
-        try {
-            sql = SqlValidator.enforceUserId(sql, userId);
-        } catch (IllegalArgumentException e) {
-            log.warn("[AiToolExecutor] userId 강제 치환 실패: {}", e.getMessage());
-            return AiToolResponse.fail(e.getMessage());
-        }
+        // 2단계: 개인 테이블을 인증된 userId의 행만 담은 파생 테이블로 바꿔 읽는다.
+        //         SQL의 조건(OR 1=1, user_id 누락, 조건 없는 JOIN 등)과 상관없이 타인 행에 닿지 않는다.
+        String contracted = AiSqlRewriter.rewrite(sql, AiDataContract.Audience.USER, userId);
 
         log.info("[AiToolExecutor] SQL실행(개인 userId={}): {}",
                 userId, sql.substring(0, Math.min(150, sql.length())));
-        List<Map<String, Object>> rows = runNativeQuery(sql, null);
+        List<Map<String, Object>> rows = runNativeQuery(contracted);
 
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("total", rows.size());
@@ -193,102 +192,30 @@ public class AiToolExecutor {
         return AiToolResponse.ok(slots, Map.of("guide", guide));
     }
 
-    // ── Native Query 실행 ────────────────────────────────────────────────────
+    // ── 쿼리 실행 ────────────────────────────────────────────────────────────
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private List<Map<String, Object>> runNativeQuery(String sql, Map<String, Object> params) {
+    /**
+     * Runs the statement on the read-only transaction's connection. JDBC is used rather than a JPA native query: a
+     * failing JPA query marks the transaction for rollback, so a bad LLM statement used to end as a server error at
+     * commit instead of a failed tool result. Column names come from the result set, so {@code SELECT *} and
+     * expressions keep their real names.
+     */
+    private List<Map<String, Object>> runNativeQuery(String sql) {
         String finalSql = appendLimit(sql, 50);
-        List<String> columns = extractColumnNames(finalSql);
-
-        var query = em.createNativeQuery(finalSql);
-        if (params != null) {
-            params.forEach(query::setParameter);
-        }
-
-        List rawResults;
+        List<Map<String, Object>> rawRows;
         try {
-            rawResults = query.getResultList();
+            rawRows = jdbcTemplate.queryForList(finalSql);
         } catch (Exception e) {
             log.warn("[AiToolExecutor] 쿼리 실행 실패: {}", e.getMessage());
             throw e;
         }
 
-        if (rawResults == null || rawResults.isEmpty()) return List.of();
-
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (Object raw : rawResults) {
+        List<Map<String, Object>> result = new ArrayList<>(rawRows.size());
+        for (Map<String, Object> raw : rawRows) {
             Map<String, Object> row = new LinkedHashMap<>();
-
-            if (raw instanceof Object[] arr) {
-                // 다중 컬럼 결과 (일반 SELECT)
-                for (int i = 0; i < arr.length; i++) {
-                    String colName = (i < columns.size()) ? columns.get(i) : "col_" + i;
-                    row.put(colName, convertValue(arr[i]));
-                }
-            } else {
-                // 단일 값 결과 (COUNT(*), SUM(...) 등)
-                String colName = columns.isEmpty() ? "result" : columns.get(0);
-                row.put(colName, convertValue(raw));
-            }
+            raw.forEach((column, value) -> row.put(column, convertValue(value)));
             result.add(row);
         }
-        return result;
-    }
-
-    /**
-     * SELECT 절에서 컬럼명/별칭 추출.
-     * 별칭(AS ...)이 있으면 별칭 사용, 없으면 컬럼명 사용.
-     */
-    private List<String> extractColumnNames(String sql) {
-        List<String> names = new ArrayList<>();
-        try {
-            // SELECT ... FROM 사이 추출
-            String upper = sql.toUpperCase();
-            int selectIdx = upper.indexOf("SELECT") + 6;
-            int fromIdx   = upper.indexOf(" FROM ");
-            if (fromIdx < 0) fromIdx = upper.indexOf("\nFROM");
-            if (fromIdx < 0) return names;
-
-            String selectPart = sql.substring(selectIdx, fromIdx).trim();
-
-            // 괄호 안의 쉼표 무시하고 컬럼 분리
-            List<String> cols = splitSelectColumns(selectPart);
-            for (String col : cols) {
-                col = col.trim();
-                // AS 별칭이 있으면 별칭 사용
-                String[] asParts = col.split("(?i)\\s+AS\\s+");
-                if (asParts.length >= 2) {
-                    names.add(asParts[asParts.length - 1].trim().replaceAll("[`\"'\\[\\]]", ""));
-                } else {
-                    // 테이블명.컬럼명 → 컬럼명만
-                    String[] dotParts = col.split("\\.");
-                    String colName = dotParts[dotParts.length - 1].trim()
-                        .replaceAll("[`\"'\\[\\]]", "")
-                        .replaceAll("\\s.*", ""); // 공백 이후 제거
-                    names.add(colName.toLowerCase());
-                }
-            }
-        } catch (Exception e) {
-            log.debug("[AiToolExecutor] 컬럼명 파싱 실패, 인덱스 사용: {}", e.getMessage());
-        }
-        return names;
-    }
-
-    private List<String> splitSelectColumns(String selectPart) {
-        List<String> result = new ArrayList<>();
-        int depth = 0;
-        StringBuilder current = new StringBuilder();
-        for (char c : selectPart.toCharArray()) {
-            if (c == '(') depth++;
-            else if (c == ')') depth--;
-            else if (c == ',' && depth == 0) {
-                result.add(current.toString());
-                current = new StringBuilder();
-                continue;
-            }
-            current.append(c);
-        }
-        if (!current.isEmpty()) result.add(current.toString());
         return result;
     }
 
@@ -306,6 +233,8 @@ public class AiToolExecutor {
         if (v instanceof java.math.BigDecimal bd) return bd.stripTrailingZeros().toPlainString();
         if (v instanceof java.sql.Timestamp ts) return ts.toLocalDateTime().toString();
         if (v instanceof java.sql.Date d) return d.toLocalDate().toString();
+        if (v instanceof java.time.LocalDateTime ldt) return ldt.toString();
+        if (v instanceof java.time.LocalDate ld) return ld.toString();
         if (v instanceof byte[] b) return new String(b);
         return v;
     }
