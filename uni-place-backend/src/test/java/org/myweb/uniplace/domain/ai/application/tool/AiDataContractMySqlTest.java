@@ -17,6 +17,8 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.myweb.uniplace.domain.ai.application.tool.AiDataContract.Audience;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -105,6 +107,39 @@ class AiDataContractMySqlTest {
         }
         assertThat(userIds(Audience.PUBLIC, "SELECT b.user_id FROM board b WHERE b.board_title = 'anonymous post'"))
             .containsOnly((String) null);
+    }
+
+    @Test
+    void communityPostsAreSearchedWithTheKeywordAsText() throws SQLException {
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO board (board_title, user_id, board_ctnt, code, read_count)"
+                + " SELECT 'Laundry room 100% open', '" + user + "', 'washer_dryer notes', code, 1000000 FROM common_code LIMIT 1");
+        }
+        AiPublicReads reads = publicReads();
+
+        assertThat(reads.searchCommunityPosts("100%", 5)).extracting(row -> row.get("board_title"))
+            .containsExactly("Laundry room 100% open");
+        assertThat(reads.searchCommunityPosts("washer_dryer", 5)).hasSize(1);
+        assertThat(reads.searchCommunityPosts("washer%dryer", 5)).as("% is matched as text").isEmpty();
+        assertThat(reads.searchCommunityPosts("' OR 1=1 --", 5)).as("the keyword is a bound value").isEmpty();
+        assertThat(reads.searchCommunityPosts("", 3)).as("no keyword: newest posts").hasSize(3)
+            .first().satisfies(row -> assertThat(row).containsOnlyKeys("board_id", "board_title", "board_ctnt", "created_at"));
+        assertThat(reads.searchCommunityPosts("", 500)).hasSizeLessThanOrEqualTo(AiPublicReads.MAX_POSTS);
+        assertThat(reads.popularCommunityPosts(7, 3)).as("most read first").first()
+            .satisfies(row -> assertThat(row.get("board_title")).isEqualTo("Laundry room 100% open"));
+    }
+
+    @Test
+    void roomsForTheEmbeddingIndexCarryTheirBuildingWithoutLessorDetails() {
+        List<Map<String, Object>> rooms = publicReads().roomsForEmbedding();
+        assertThat(rooms).isNotEmpty();
+        assertThat(rooms.get(0)).containsKeys("room_id", "room_desc", "building_nm", "building_addr")
+            .doesNotContainKeys("building_lessor_nm", "building_lessor_rrn");
+    }
+
+    private static AiPublicReads publicReads() {
+        return new AiPublicReads(new JdbcTemplate(
+            new DriverManagerDataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())));
     }
 
     private static List<String> userIds(Audience audience, String sql) throws SQLException {

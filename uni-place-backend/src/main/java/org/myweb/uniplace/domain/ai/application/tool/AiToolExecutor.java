@@ -34,6 +34,7 @@ import java.util.*;
 public class AiToolExecutor {
 
     private final JdbcTemplate jdbcTemplate;
+    private final AiPublicReads publicReads;
     private final TourReservationRepository tourRepository;
     private final UserRepository userRepository;
 
@@ -51,6 +52,11 @@ public class AiToolExecutor {
                 case "query_database_admin"        -> executeAdminSql(args, userId);   // AI 내부 집계용: requiresAuth 우회, userId 필요
                 case "query_my_data"               -> executePrivateSql(args, userId);
                 case "get_tour_available_slots"    -> getTourSlots(args);
+                case "search_community_posts"      -> rows(publicReads.searchCommunityPosts(
+                                                        getString(args, "keyword"), intOr(args, "limit", 5)));
+                case "popular_community_posts"     -> rows(publicReads.popularCommunityPosts(
+                                                        intOr(args, "days", 7), intOr(args, "limit", 3)));
+                case "list_rooms_for_embedding"    -> rows(publicReads.roomsForEmbedding());
                 case "classify_complain_priority"  -> AiToolResponse.fail("관리자 API를 통해 처리됩니다.");
                 default -> {
                     log.warn("[AiToolExecutor] 알 수 없는 tool: {}", tool);
@@ -210,6 +216,15 @@ public class AiToolExecutor {
             throw e;
         }
 
+        return convertRows(rawRows);
+    }
+
+    private AiToolResponse rows(List<Map<String, Object>> rawRows) {
+        List<Map<String, Object>> rows = convertRows(rawRows);
+        return AiToolResponse.ok(rows, Map.of("total", rows.size()));
+    }
+
+    private List<Map<String, Object>> convertRows(List<Map<String, Object>> rawRows) {
         List<Map<String, Object>> result = new ArrayList<>(rawRows.size());
         for (Map<String, Object> raw : rawRows) {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -248,6 +263,11 @@ public class AiToolExecutor {
     private String getString(Map<String, Object> args, String key) {
         Object v = args.get(key);
         return v != null ? v.toString().trim() : null;
+    }
+
+    private int intOr(Map<String, Object> args, String key, int fallback) {
+        Integer value = getInt(args, key);
+        return value != null ? value : fallback;
     }
 
     private Integer getInt(Map<String, Object> args, String key) {
