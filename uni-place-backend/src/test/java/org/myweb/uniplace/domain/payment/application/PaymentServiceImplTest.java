@@ -60,8 +60,8 @@ import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class PaymentServiceImplTest {
-// dt1
-	
+
+    @Mock
     private PaymentRepository paymentRepository;
     @Mock
     private PaymentIntentRepository paymentIntentRepository;
@@ -207,7 +207,7 @@ class PaymentServiceImplTest {
         given(contractRepository.findById(300)).willReturn(Optional.of(contract(300, ContractStatus.active)));
         given(contractRepository.findById(400)).willReturn(Optional.of(contract(400, ContractStatus.approved)));
         given(serviceGoodsRepository.findById(2)).willReturn(Optional.of(goods));
-        given(paymentRepository.findTopByUserIdAndIdempotencyKeyOrderByPaymentIdDesc(userId, "MCB:201,301"))
+        given(paymentRepository.findTopByUserIdAndIdempotencyKeyOrderByPaymentIdDesc(userId, "MCB:KAKAO:201,301"))
             .willReturn(Optional.empty());
         given(paymentGatewayFactory.get("KAKAO")).willReturn(paymentGateway);
         given(paymentGateway.ready(any(PaymentGatewayReadyRequest.class))).willReturn(ready);
@@ -228,7 +228,7 @@ class PaymentServiceImplTest {
         Payment saved = paymentCaptor.getValue();
         assertThat(saved.getTargetType()).isEqualTo("monthly_charge");
         assertThat(saved.getTargetId()).isEqualTo(201);
-        assertThat(saved.getIdempotencyKey()).isEqualTo("MCB:201,301");
+        assertThat(saved.getIdempotencyKey()).isEqualTo("MCB:KAKAO:201,301");
         assertThat(saved.getTotalPrice()).isEqualByComparingTo(new BigDecimal("1100000"));
     }
     @Test
