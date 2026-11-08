@@ -43,6 +43,9 @@ kubectl -n uniplace rollout status deployment/milvus
 ```bash
 kubectl -n uniplace delete pvc ai-chroma-pvc --ignore-not-found=true
 ```
+- The AI service's source is now [Dev-Forge-Group/uniplace-ai](https://github.com/Dev-Forge-Group/uniplace-ai). Its Image
+  workflow pushes `uniplace-ai:<commit>` and `uniplace-ai:main`; it moves `uniplace-ai:latest`, which `deploy/k8s/ai` runs,
+  only when run by hand with "promote to latest". Until then `latest` still comes from this repository's `dev` pipeline.
 - Apply AI secret changes and restart deployment:
 ```bash
 kubectl -n uniplace create secret generic ai-secrets --from-env-file=AI/aws.env --dry-run=client -o yaml | kubectl apply -f -

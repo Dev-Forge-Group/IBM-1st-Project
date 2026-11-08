@@ -1,0 +1,19 @@
+name: AI moved
+
+# The AI service now lives in Dev-Forge-Group/uniplace-ai, which is its source. AI/ stays here only until the deployment
+# runs the image built there, so a pull request that changes AI/ fails: make the change in uniplace-ai instead.
+on:
+  pull_request:
+    paths:
+      - "AI/**"
+
+permissions:
+  contents: read
+
+jobs:
+  moved:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::AI/ moved to https://github.com/Dev-Forge-Group/uniplace-ai. Change the AI service there; this copy is removed once the deployment runs uniplace-ai's image."
+          exit 1
