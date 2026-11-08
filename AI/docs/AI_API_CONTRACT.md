@@ -31,3 +31,28 @@ This document is the single source of truth for intent-to-endpoint mapping.
 3. FastAPI normalizes slot names by snake_case/camelCase (`get_slot`).
 4. Spring sends `X-AI-Contract-Version` header for version tracking.
 5. FastAPI exposes `/api/v1/ai/contract` for contract introspection.
+
+## Data access for generated SQL (FastAPI -> Spring)
+
+The chatbot's text-to-SQL tools send SQL to Spring's `/v1/ai/tools/execute`, which runs it. What that SQL may read is
+decided in one place, `AiDataContract` in `uni-place-backend/.../domain/ai/application/tool/`:
+
+| Tool | Reads |
+|---|---|
+| `query_database` (signed out) | Open tables as stored; `building`, `room_reservation`, `space_reservations`, `board`, `reply`, the like tables and `orders` without personal columns. Personal tables (`users`, `contract`, `complain`, `payment`, `monthly_charge`, `qna`) answer `AUTH_REQUIRED`. |
+| `query_my_data` (signed in) | The same, plus the personal tables restricted to the signed-in user's rows. The restriction is applied to each table the SQL reads, so conditions in the SQL cannot widen it. |
+| `query_database_admin` (administrators) | Every table except credentials, biometrics and login tokens, without the password hash and resident registration numbers. |
+
+Before running a statement, Spring replaces every table it reads with what the contract allows. Comments and other
+schemas are refused. `AiDataContractMySqlTest` applies the Flyway migrations to MySQL and checks the contract against
+the real schema, so a migration that drops a column the contract reads fails there. `app/services/tools/db_schema.py`
+only describes the schema to the LLM; it does not decide access.
+
+The AI service has no database connection of its own. Its fixed reads go through Spring tools that take bound
+parameters and read through the same public view (`AiPublicReads`):
+
+| Tool | Args | Used by |
+|---|---|---|
+| `search_community_posts` | `keyword`, `limit` (≤ 10) | RAG community search; an empty keyword gives the newest posts |
+| `popular_community_posts` | `days` (≤ 90), `limit` (≤ 10) | RAG popular posts |
+| `list_rooms_for_embedding` | none | `python -m app.ai.room_embed` (needs `SPRING_BASE_URL` and `AI_INTERNAL_TOKEN`) |

@@ -9,6 +9,11 @@
   - `deploy/argocd/backend-application.yaml`
   - `deploy/argocd/ai-application.yaml`
   - `deploy/argocd/frontend-application.yaml`
+  - `deploy/argocd/milvus-application.yaml`
+- The repository now lives at `https://github.com/Dev-Forge-Group/IBM-1st-Project.git` (moved from `SeolJhin` on
+  2026-11-07). Changing `repoURL` in Git does not change the Applications already in the cluster: register the new
+  repository's credentials in Argo CD (the old ones were issued for the personal account), then apply again each
+  Application file the cluster uses (step 3, and `milvus-application.yaml` if Milvus is managed by Argo CD).
 
 ## 2) Prepare secrets in cluster
 - `backend-secrets` in namespace `uniplace`
