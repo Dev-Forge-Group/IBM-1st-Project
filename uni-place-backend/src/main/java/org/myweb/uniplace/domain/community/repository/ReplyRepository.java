@@ -18,6 +18,16 @@ public interface ReplyRepository extends JpaRepository<Reply, Integer> {
 
     long countByBoardId(Integer boardId);
 
+    // Number anonymous authors using their first anonymous reply, including child replies.
+    // This identity list stays inside the service; public responses contain only the ordinal.
+    @Query("""
+        select r.userId from Reply r
+         where r.boardId = :boardId and upper(r.anonymity) = 'Y'
+         group by r.userId
+         order by min(r.replyId)
+    """)
+    List<String> findAnonymousAuthorsByBoardId(@Param("boardId") Integer boardId);
+
     // ✅ 관리자 삭제용: boardId에 속한 replyId들
     @Query("select r.replyId from Reply r where r.boardId = :boardId")
     List<Integer> findReplyIdsByBoardId(@Param("boardId") Integer boardId);

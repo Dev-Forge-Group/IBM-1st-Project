@@ -13,8 +13,7 @@ import org.myweb.uniplace.domain.notification.domain.enums.NotificationType;
 import org.myweb.uniplace.domain.notification.domain.enums.TargetType;
 import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.domain.property.repository.RoomRepository;
-import org.myweb.uniplace.domain.contract.repository.ContractRepository;
-import org.myweb.uniplace.domain.contract.domain.enums.ContractStatus;
+import org.myweb.uniplace.domain.contract.application.publicapi.ReviewContractHistory;
 import org.myweb.uniplace.domain.review.api.dto.request.ReviewCreateRequest;
 import org.myweb.uniplace.domain.review.api.dto.request.ReviewUpdateRequest;
 import org.myweb.uniplace.domain.review.api.dto.response.ReviewResponse;
@@ -51,7 +50,7 @@ public class ReviewServiceImpl implements ReviewService {
     private final ReviewRepository reviewRepository;
     private final ReviewLikeRepository reviewLikeRepository;
     private final RoomRepository roomRepository;
-    private final ContractRepository contractRepository;
+    private final ReviewContractHistory reviewContractHistory;
     private final FileService fileService;
     private final NotificationService notificationService;
     private final UserRepository userRepository;
@@ -244,10 +243,9 @@ public class ReviewServiceImpl implements ReviewService {
         }
 
         // 해당 방에 active 또는 ended 계약 이력이 있는지 확인
-        boolean hasContractHistory = contractRepository.existsByUserIdAndRoomIdAndStatusIn(
+        boolean hasContractHistory = reviewContractHistory.hasActiveOrEndedContract(
                 userId,
-                request.getRoomId(),
-                java.util.List.of(ContractStatus.active, ContractStatus.ended)
+                request.getRoomId()
         );
         if (!hasContractHistory) {
             throw new BusinessException(ErrorCode.REVIEW_NO_CONTRACT);

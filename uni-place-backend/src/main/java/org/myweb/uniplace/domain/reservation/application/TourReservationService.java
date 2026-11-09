@@ -9,6 +9,7 @@ import org.myweb.uniplace.domain.reservation.api.dto.request.CreateTourReservati
 import org.myweb.uniplace.domain.reservation.api.dto.request.LookupTourReservationRequest;
 import org.myweb.uniplace.domain.reservation.api.dto.response.TourReservableResponse;
 import org.myweb.uniplace.domain.reservation.api.dto.response.TourReservationResponse;
+import org.myweb.uniplace.domain.reservation.domain.enums.TourStatus;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -20,6 +21,8 @@ public interface TourReservationService {
     Page<TourReservationResponse> lookup(LookupTourReservationRequest request, Pageable pageable);
 
     TourReservationResponse cancel(Integer tourId, CancelTourReservationRequest request);
+
+    void changeStatus(Integer tourId, TourStatus status);
 
     // ✅ (추가) 특정 방 + 특정 날짜 예약 가능 슬롯
     TourReservableResponse reservableSlots(Integer buildingId, Integer roomId, LocalDate date);

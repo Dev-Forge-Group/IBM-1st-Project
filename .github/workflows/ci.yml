@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev, 'release-validation/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: uni-place-frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up the pinned Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: uni-place-frontend/package.json
+          cache: npm
+          cache-dependency-path: uni-place-frontend/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run frontend tests
+        run: npm test -- --reporter=default --reporter=junit --outputFile="${RUNNER_TEMP}/ibm-frontend-vitest.xml"
+
+      - name: Build
+        run: npm run build
+
+      - name: Preserve frontend test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-reports
+          path: ${{ runner.temp }}/ibm-frontend-vitest.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: uni-place-backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            uni-place-backend/*.gradle
+            uni-place-backend/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Require Docker for MySQL integration tests
+        run: docker info --format '{{.ServerVersion}}'
+
+      - name: Verify the test-result checker
+        run: python3 -B -m unittest discover -s ../scripts/ci -p 'test_*.py' -v
+
+      - name: Run all backend tests and build
+        run: bash ./gradlew cleanTest test build --no-daemon --no-build-cache --max-workers=2 --console=plain
+
+      - name: Require executed database and privacy tests
+        run: python3 ../scripts/ci/verify_junit.py build/test-results/test
+
+      - name: Preserve backend test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: |
+            uni-place-backend/build/test-results/test/
+            uni-place-backend/build/reports/tests/test/
+          if-no-files-found: warn
+          retention-days: 7

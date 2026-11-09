@@ -4,7 +4,6 @@ package org.myweb.uniplace.domain.reservation.application;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import org.myweb.uniplace.domain.property.api.dto.request.SpaceSearchRequest;
 import org.myweb.uniplace.domain.property.api.dto.response.SpaceResponse;
@@ -41,6 +40,9 @@ import org.myweb.uniplace.global.exception.ErrorCode;
 import org.myweb.uniplace.global.security.AuthUser;
 import org.myweb.uniplace.global.slack.SlackNotificationService;
 import org.springframework.data.domain.*;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -108,10 +110,6 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
                     dayEnd
             );
 
-            Set<String> reservedKeys = reserved.stream()
-                    .map(e -> key(e.getSrStartAt(), e.getSrEndAt()))
-                    .collect(Collectors.toSet());
-
             List<SpaceReservableResponse.TimeSlotResponse> available = Arrays.stream(SpaceFixedSlot.values())
                     .map(slot -> {
                         LocalDateTime startAt = LocalDateTime.of(date, slot.getStart());
@@ -122,7 +120,9 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
                                 .endAt(endAt)
                                 .build();
                     })
-                    .filter(ts -> !reservedKeys.contains(key(ts.getStartAt(), ts.getEndAt())))
+                    .filter(ts -> reserved.stream().noneMatch(reservation ->
+                            ts.getStartAt().isBefore(reservation.getSrEndAt())
+                                    && ts.getEndAt().isAfter(reservation.getSrStartAt())))
                     .toList();
 
             return SpaceReservableResponse.builder()
@@ -200,8 +200,9 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
                 request.getSrEndAt()
         );
 
-        SpaceReservationEntity saved = spaceReservationRepository.save(
-                SpaceReservationEntity.builder()
+        SpaceReservationEntity saved;
+        try {
+            saved = spaceReservationRepository.saveAndFlush(SpaceReservationEntity.builder()
                         .building(building)
                         .space(space)
                         .user(user)
@@ -209,8 +210,13 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
                         .srEndAt(request.getSrEndAt())
                         .srNoPeople(request.getSrNoPeople())
                         .srSt(SpaceReservationStatus.requested)
-                        .build()
-        );
+                        .build());
+        } catch (DataIntegrityViolationException failure) {
+            if (isActiveSlotDuplicate(failure)) {
+                throw new BusinessException(ErrorCode.SPACE_RESERVATION_TIME_CONFLICT);
+            }
+            throw failure;
+        }
 
         // =========================
         // 알림(여기 라인에 넣기) - 예약 생성 직후
@@ -277,6 +283,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         }
 
         e.setSrSt(SpaceReservationStatus.cancelled);
+        flushReservationChange();
 
         // =========================
         // ✅ 알림(여기 라인에 넣기) - 사용자 취소 직후
@@ -392,6 +399,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         }
 
         e.setSrSt(SpaceReservationStatus.confirmed);
+        flushReservationChange();
 
         // =========================
         // 알림 - 관리자 확정 직후
@@ -427,6 +435,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         }
 
         e.setSrSt(SpaceReservationStatus.ended);
+        flushReservationChange();
 
         // 종료 알림을 원하면 여기서 NotificationType 하나 더 추가해서 보내면 됨
 
@@ -449,6 +458,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         }
 
         e.setSrSt(SpaceReservationStatus.cancelled);
+        flushReservationChange();
 
         // =========================
         // 알람 -관리자 취소 직후
@@ -471,6 +481,32 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         return SpaceReservationResponse.fromEntity(e);
     }
 
+    private boolean isActiveSlotDuplicate(DataIntegrityViolationException failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException constraint
+                    && constraint.getSQLException().getErrorCode() == 1062) {
+                String name = constraint.getConstraintName();
+                if (name == null) return false;
+                name = name.replace("`", "").replace("\"", "");
+                return name.equals("uk_space_reservation_active_slot")
+                        || name.equals("space_reservations.uk_space_reservation_active_slot");
+            }
+            if (cause == cause.getCause()) break;
+        }
+        return false;
+    }
+
+    private void flushReservationChange() {
+        try {
+            spaceReservationRepository.flush();
+        } catch (ObjectOptimisticLockingFailureException failure) {
+            if (SpaceReservationEntity.class.getName().equals(failure.getPersistentClassName())) {
+                throw new BusinessException(ErrorCode.SPACE_RESERVATION_CONCURRENT_CHANGE);
+            }
+            throw failure;
+        }
+    }
+
     private void requireAdmin(AuthUser me) {
         if (me == null || me.getUserId() == null) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED);
@@ -487,7 +523,4 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         }
     }
 
-    private static String key(LocalDateTime startAt, LocalDateTime endAt) {
-        return startAt + "|" + endAt;
-    }
 }

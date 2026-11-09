@@ -26,6 +26,10 @@ public class ReservationValidator {
             throw new BusinessException(ErrorCode.TOUR_RESERVATION_INVALID_TIME);
         }
 
+        if (!startAt.toLocalDate().equals(endAt.toLocalDate())) {
+            throw new BusinessException(ErrorCode.TOUR_RESERVATION_INVALID_TIME);
+        }
+
         long minutes = Duration.between(startAt, endAt).toMinutes();
         if (minutes < MIN_TOUR_MINUTES) {
             throw new BusinessException(ErrorCode.TOUR_RESERVATION_INVALID_TIME);

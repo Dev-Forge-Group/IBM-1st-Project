@@ -19,8 +19,9 @@ public class BoardResponse {
     private String boardTitle;
 
     private String userId;            // 익명이면 "익명(글쓴이)", 아니면 닉네임
-    private String realUserId;        // 항상 실제 userId (본인 여부 판단용)
-    private String realUserNickname;  // 항상 실제 닉네임 (어드민 표시용)
+    private String realUserId;        // 익명 글은 관리자에게만 제공
+    private String realUserNickname;
+    private boolean mine;            // 익명 작성자도 실제 ID 없이 편집 가능
 
     private String boardCtnt;
 
@@ -43,6 +44,11 @@ public class BoardResponse {
     private List<FileResponse> files;
 
     public static BoardResponse fromEntity(Board e, List<FileResponse> files, long likeCount, boolean likedByMe, User author) {
+        return fromEntity(e, files, likeCount, likedByMe, author, null, false);
+    }
+
+    public static BoardResponse fromEntity(Board e, List<FileResponse> files, long likeCount, boolean likedByMe,
+                                           User author, String viewerId, boolean administrator) {
         String realNickname = (author != null && author.getUserNickname() != null && !author.getUserNickname().isBlank())
                 ? author.getUserNickname()
                 : e.getUserId();
@@ -58,8 +64,9 @@ public class BoardResponse {
                 .boardId(e.getBoardId())
                 .boardTitle(e.getBoardTitle())
                 .userId(displayName)
-                .realUserId(e.getUserId())
-                .realUserNickname(realNickname)   // 어드민용: 항상 실제 닉네임
+                .realUserId(!e.isAnonymous() || administrator ? e.getUserId() : null)
+                .realUserNickname(!e.isAnonymous() || administrator ? realNickname : null)
+                .mine(viewerId != null && viewerId.equals(e.getUserId()))
                 .boardCtnt(e.getBoardCtnt())
                 .readCount(e.getReadCount())
                 .code(e.getCode())
@@ -88,5 +95,10 @@ public class BoardResponse {
     // 파일 없이 + User 포함
     public static BoardResponse fromEntity(Board e, long likeCount, boolean likedByMe, User author) {
         return fromEntity(e, null, likeCount, likedByMe, author);
+    }
+
+    public static BoardResponse fromEntity(Board e, long likeCount, boolean likedByMe, User author,
+                                           String viewerId, boolean administrator) {
+        return fromEntity(e, null, likeCount, likedByMe, author, viewerId, administrator);
     }
 }

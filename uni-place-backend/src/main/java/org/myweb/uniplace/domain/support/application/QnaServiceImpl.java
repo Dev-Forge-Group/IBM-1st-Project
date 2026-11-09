@@ -2,7 +2,7 @@ package org.myweb.uniplace.domain.support.application;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.myweb.uniplace.domain.commoncode.repository.CommonCodeRepository;
+import org.myweb.uniplace.domain.commoncode.application.publicapi.CommonCodeLookup;
 import org.myweb.uniplace.domain.notification.application.NotificationService;
 import org.myweb.uniplace.domain.notification.domain.enums.NotificationType;
 import org.myweb.uniplace.domain.notification.domain.enums.TargetType;
@@ -32,7 +32,7 @@ public class QnaServiceImpl implements QnaService {
     private static final String DEFAULT_SUPPORT_CODE = "SUP_GENERAL";
 
     private final QnaRepository qnaRepository;
-    private final CommonCodeRepository commonCodeRepository;
+    private final CommonCodeLookup commonCodeLookup;
     private final NotificationService notificationService;
     private final BannedWordService bannedWordService;
 
@@ -218,7 +218,7 @@ public class QnaServiceImpl implements QnaService {
         String mapped = mapSupportCode(rawCode);
         if ("ALL".equalsIgnoreCase(mapped)) return null;
 
-        return commonCodeRepository.existsByCode(mapped) ? mapped : null;
+        return commonCodeLookup.exists(mapped) ? mapped : null;
     }
 
     private String normalizeSupportCodeForWrite(String rawCode) {
@@ -229,7 +229,7 @@ public class QnaServiceImpl implements QnaService {
 
         if (mapped.startsWith("QNA_")) return mapped;
 
-        return commonCodeRepository.existsByCode(mapped) ? mapped : DEFAULT_SUPPORT_CODE;
+        return commonCodeLookup.exists(mapped) ? mapped : DEFAULT_SUPPORT_CODE;
     }
 
     private String mapSupportCode(String rawCode) {

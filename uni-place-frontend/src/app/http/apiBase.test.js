@@ -1,4 +1,8 @@
-import { fetchWithAuthRetry, withApiPrefix } from './apiBase';
+import {
+  fetchWithAuthRetry,
+  refreshAccessTokenOnce,
+  withApiPrefix,
+} from './apiBase';
 import {
   __resetAuthResumeForTest,
   AUTH_SESSION_EXPIRED_EVENT,
@@ -101,6 +105,56 @@ describe('fetchWithAuthRetry', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(localStorage.getItem('access_token')).toBeNull();
     expect(localStorage.getItem('refresh_token')).toBeNull();
+  });
+
+  test.each([403, 429, 500, 502, 503])(
+    'preserves the session after refresh HTTP %s so a later request can recover',
+    async (status) => {
+      localStorage.setItem('access_token', 'old-access');
+      localStorage.setItem('refresh_token', 'refresh-1');
+      localStorage.setItem('device_id', 'device-1');
+      const eventHandler = jest.fn();
+      window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, eventHandler);
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(status, { success: false }))
+        .mockResolvedValueOnce(
+          jsonResponse(200, {
+            success: true,
+            data: {
+              accessToken: 'new-access',
+              refreshToken: 'refresh-2',
+              deviceId: 'device-1',
+            },
+          })
+        );
+
+      try {
+        await expect(refreshAccessTokenOnce()).rejects.toMatchObject({ status });
+        expect(localStorage.getItem('access_token')).toBe('old-access');
+        expect(localStorage.getItem('refresh_token')).toBe('refresh-1');
+        expect(eventHandler).not.toHaveBeenCalled();
+        expect(peekAuthResumeSnapshot()).toBeNull();
+
+        expect(await refreshAccessTokenOnce()).toBe(true);
+        expect(localStorage.getItem('access_token')).toBe('new-access');
+        expect(localStorage.getItem('refresh_token')).toBe('refresh-2');
+      } finally {
+        window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, eventHandler);
+      }
+    }
+  );
+
+  test('preserves tokens when a successful refresh response is malformed', async () => {
+    localStorage.setItem('access_token', 'old-access');
+    localStorage.setItem('refresh_token', 'refresh-1');
+    localStorage.setItem('device_id', 'device-1');
+    global.fetch = jest.fn().mockResolvedValue(jsonResponse(200, null));
+
+    await expect(refreshAccessTokenOnce()).rejects.toMatchObject({ status: 502 });
+    expect(localStorage.getItem('access_token')).toBe('old-access');
+    expect(localStorage.getItem('refresh_token')).toBe('refresh-1');
+    expect(peekAuthResumeSnapshot()).toBeNull();
   });
 
   test('dispatches auth-expired event and stores resume snapshot when refresh fails', async () => {

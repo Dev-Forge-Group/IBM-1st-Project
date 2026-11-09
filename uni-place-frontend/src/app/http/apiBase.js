@@ -54,6 +54,12 @@ function failRefreshAndRedirectToLogin() {
   return false;
 }
 
+function refreshUnavailable(status) {
+  const error = new Error('세션을 갱신하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+  error.status = status >= 400 ? status : 502;
+  return error;
+}
+
 function isAuthPath(path) {
   const text = String(path || '');
   return text.startsWith('/auth/');
@@ -82,7 +88,9 @@ async function doRefresh() {
     body: JSON.stringify({ refreshToken, deviceId }),
   });
 
-  if (res.status === 204) {
+  // Only a rejected refresh credential establishes that the session has ended.
+  // A rate limit, server failure or invalid response can recover on a later request.
+  if (res.status === 401 || res.status === 204) {
     return failRefreshAndRedirectToLogin();
   }
 
@@ -97,12 +105,12 @@ async function doRefresh() {
       : null;
 
   if (!res.ok || (api && api.success === false)) {
-    return failRefreshAndRedirectToLogin();
+    throw refreshUnavailable(res.status);
   }
 
   const data = api ? api.data : payload;
   if (!data || typeof data !== 'object' || !data.accessToken) {
-    return failRefreshAndRedirectToLogin();
+    throw refreshUnavailable(res.status);
   }
 
   setTokens(data);

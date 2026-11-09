@@ -66,7 +66,7 @@ public class BoardServiceImpl implements BoardService {
                 long cnt = boardLikeRepository.countByIdBoardId(b.getBoardId());
                 boolean liked = (me != null) && boardLikeRepository.existsByIdUserIdAndIdBoardId(me, b.getBoardId());
                 org.myweb.uniplace.domain.user.domain.entity.User author = userRepository.findById(b.getUserId()).orElse(null);
-                return BoardResponse.fromEntity(b, cnt, liked, author);
+                return BoardResponse.fromEntity(b, cnt, liked, author, me, CommunityViewer.current().administrator());
             });
             return PageResponse.of(mapped);
         }
@@ -98,7 +98,7 @@ public class BoardServiceImpl implements BoardService {
                     long cnt = likeCountMap.getOrDefault(b.getBoardId(), 0L);
                     boolean liked = (me != null) && boardLikeRepository.existsByIdUserIdAndIdBoardId(me, b.getBoardId());
                     org.myweb.uniplace.domain.user.domain.entity.User author = userRepository.findById(b.getUserId()).orElse(null);
-                    return BoardResponse.fromEntity(b, cnt, liked, author);
+                    return BoardResponse.fromEntity(b, cnt, liked, author, me, CommunityViewer.current().administrator());
                 })
                 .toList();
 
@@ -110,7 +110,7 @@ public class BoardServiceImpl implements BoardService {
                     long cnt = likeCountMap.getOrDefault(b.getBoardId(), 0L);
                     boolean liked = (me != null) && boardLikeRepository.existsByIdUserIdAndIdBoardId(me, b.getBoardId());
                     org.myweb.uniplace.domain.user.domain.entity.User author = userRepository.findById(b.getUserId()).orElse(null);
-                    return BoardResponse.fromEntity(b, cnt, liked, author);
+                    return BoardResponse.fromEntity(b, cnt, liked, author, me, CommunityViewer.current().administrator());
                 })
                 .toList();
 
@@ -145,7 +145,7 @@ public class BoardServiceImpl implements BoardService {
         Page<BoardResponse> mapped = page.map(b -> {
             long cnt = boardLikeRepository.countByIdBoardId(b.getBoardId());
             boolean liked = boardLikeRepository.existsByIdUserIdAndIdBoardId(me, b.getBoardId());
-            return BoardResponse.fromEntity(b, cnt, liked, meUser);
+            return BoardResponse.fromEntity(b, cnt, liked, meUser, me, CommunityViewer.current().administrator());
         });
         return PageResponse.of(mapped);
     }
@@ -170,7 +170,7 @@ public class BoardServiceImpl implements BoardService {
         boolean liked = (me != null) && boardLikeRepository.existsByIdUserIdAndIdBoardId(me, boardId);
 
         org.myweb.uniplace.domain.user.domain.entity.User author = userRepository.findById(board.getUserId()).orElse(null);
-        return BoardResponse.fromEntity(board, files, likeCount, liked, author);
+        return BoardResponse.fromEntity(board, files, likeCount, liked, author, me, CommunityViewer.current().administrator());
     }
 
     @Override
@@ -226,6 +226,11 @@ public class BoardServiceImpl implements BoardService {
         AuthUser authUser = requireCurrentAuthUser();
         if (!canModifyBoard(board, authUser)) throw new BusinessException(ErrorCode.FORBIDDEN);
 
+        String boardCode = request.getCode() == null ? null : normalizeBoardCodeForWrite(request.getCode());
+        if (boardCode != null && !boardCode.equals(board.getCode())) {
+            requireBoardWriteRole(authUser, boardCode);
+        }
+
         if (request.getBoardTitle() != null) {
             board.setBoardTitle(bannedWordService.filter(request.getBoardTitle()));
         }
@@ -233,7 +238,7 @@ public class BoardServiceImpl implements BoardService {
         if (request.getBoardCtnt() != null) {
             board.setBoardCtnt(bannedWordService.filter(request.getBoardCtnt()));
         }
-        if (request.getCode() != null) board.setCode(normalizeBoardCodeForWrite(request.getCode()));
+        if (boardCode != null) board.setCode(boardCode);
 
         if (request.getAnonymity() != null) board.setAnonymity(nvlYn(request.getAnonymity(), board.getAnonymity()));
         if (request.getImportance() != null) board.setImportance(nvlYn(request.getImportance(), board.getImportance()));
@@ -300,7 +305,7 @@ public class BoardServiceImpl implements BoardService {
             long cnt = boardLikeRepository.countByIdBoardId(b.getBoardId());
             boolean liked = (me != null) && boardLikeRepository.existsByIdUserIdAndIdBoardId(me, b.getBoardId());
             org.myweb.uniplace.domain.user.domain.entity.User author = userRepository.findById(b.getUserId()).orElse(null);
-            return BoardResponse.fromEntity(b, cnt, liked, author);
+            return BoardResponse.fromEntity(b, cnt, liked, author, me, CommunityViewer.current().administrator());
         });
         return PageResponse.of(mapped);
     }
@@ -319,8 +324,7 @@ public class BoardServiceImpl implements BoardService {
     }
 
     private String tryCurrentUserId() {
-        try { return requireCurrentUserId(); }
-        catch (Exception e) { return null; }
+        return CommunityViewer.current().userId();
     }
 
     private String requireCurrentUserId() {
@@ -329,7 +333,7 @@ public class BoardServiceImpl implements BoardService {
 
     private AuthUser requireCurrentAuthUser() {
         var auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null) throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        if (auth == null || !auth.isAuthenticated()) throw new BusinessException(ErrorCode.UNAUTHORIZED);
 
         Object p = auth.getPrincipal();
         if (p instanceof AuthUser au) return au;

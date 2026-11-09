@@ -15,6 +15,12 @@ import org.springframework.web.servlet.ModelAndView;
 @Component
 public class ApiListCacheControlInterceptor implements HandlerInterceptor {
 
+    private static final List<String> COMMUNITY_PATH_PATTERNS = List.of(
+            "/boards", "/boards/**",
+            "/replies", "/replies/**",
+            "/notifications", "/notifications/**"
+    );
+
     private static final List<String> LIST_CACHE_PATH_PATTERNS = List.of(
             "/buildings",
             "/rooms",
@@ -45,6 +51,17 @@ public class ApiListCacheControlInterceptor implements HandlerInterceptor {
     }
 
     @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // @ResponseBody may commit the response before postHandle on a real
+        // servlet container, so apply the viewer policy before serialization.
+        if ("GET".equalsIgnoreCase(request.getMethod()) && handler instanceof HandlerMethod
+                && isCommunityTarget(requestPath(request))) {
+            response.setHeader("Cache-Control", "private, no-store");
+        }
+        return true;
+    }
+
+    @Override
     public void postHandle(
             HttpServletRequest request,
             HttpServletResponse response,
@@ -60,18 +77,22 @@ public class ApiListCacheControlInterceptor implements HandlerInterceptor {
         if (response.getStatus() >= 400) {
             return;
         }
+
+        String path = requestPath(request);
+
+        // Ownership and administrator-only identities vary by viewer. Do not
+        // reuse a public response across guest, owner and administrator sessions.
+        if (isCommunityTarget(path)) {
+            response.setHeader("Cache-Control", "private, no-store");
+            return;
+        }
+
         if (StringUtils.hasText(response.getHeader("Cache-Control"))) {
             return;
         }
         // Avoid caching potentially personalized responses from authenticated API calls.
         if (StringUtils.hasText(request.getHeader("Authorization"))) {
             return;
-        }
-
-        String path = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        if (StringUtils.hasText(contextPath) && path.startsWith(contextPath)) {
-            path = path.substring(contextPath.length());
         }
 
         if (isListCacheTarget(path)) {
@@ -82,5 +103,17 @@ public class ApiListCacheControlInterceptor implements HandlerInterceptor {
     private boolean isListCacheTarget(String requestPath) {
         return LIST_CACHE_PATH_PATTERNS.stream()
                 .anyMatch(pattern -> pathMatcher.match(pattern, requestPath));
+    }
+
+    private boolean isCommunityTarget(String requestPath) {
+        return COMMUNITY_PATH_PATTERNS.stream()
+                .anyMatch(pattern -> pathMatcher.match(pattern, requestPath));
+    }
+
+    private static String requestPath(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        return StringUtils.hasText(contextPath) && path.startsWith(contextPath)
+                ? path.substring(contextPath.length()) : path;
     }
 }

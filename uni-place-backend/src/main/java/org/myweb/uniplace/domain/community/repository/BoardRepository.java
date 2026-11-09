@@ -81,6 +81,7 @@ public interface BoardRepository extends JpaRepository<Board, Integer> {
     @Query("""
         select b from Board b
          where (:code is null or b.code = :code)
+           and upper(b.anonymity) = 'N'
            and lower(b.userId) like lower(concat('%', :keyword, '%'))
          order by b.boardId desc
     """)
@@ -91,7 +92,7 @@ public interface BoardRepository extends JpaRepository<Board, Integer> {
         select b from Board b
           join User u on u.userId = b.userId
          where (:code is null or b.code = :code)
-           and b.anonymity = 'N'
+           and upper(b.anonymity) = 'N'
            and lower(u.userNickname) like lower(concat('%', :keyword, '%'))
          order by b.boardId desc
     """)

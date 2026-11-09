@@ -2,11 +2,10 @@
 package org.myweb.uniplace.domain.reservation.api.admin;
 
 import org.myweb.uniplace.domain.reservation.api.dto.response.TourReservationResponse;
+import org.myweb.uniplace.domain.reservation.application.TourReservationService;
 import org.myweb.uniplace.domain.reservation.domain.entity.TourReservationEntity;
 import org.myweb.uniplace.domain.reservation.domain.enums.TourStatus;
 import org.myweb.uniplace.domain.reservation.repository.TourReservationRepository;
-import org.myweb.uniplace.global.exception.BusinessException;
-import org.myweb.uniplace.global.exception.ErrorCode;
 import org.myweb.uniplace.global.response.ApiResponse;
 import org.myweb.uniplace.global.response.PageResponse;
 
@@ -24,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 public class AdminTourReservationController {
 
     private final TourReservationRepository tourReservationRepository;
+    private final TourReservationService tourReservationService;
 
     @GetMapping
     public ApiResponse<PageResponse<TourReservationResponse>> list(
@@ -49,11 +49,7 @@ public class AdminTourReservationController {
             @PathVariable("tourId") Integer tourId,
             @RequestParam("status") TourStatus status
     ) {
-        TourReservationEntity e = tourReservationRepository.findById(tourId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.TOUR_STATUS_NOT_FOUND));
-
-        e.setTourSt(status);
-        tourReservationRepository.save(e);
+        tourReservationService.changeStatus(tourId, status);
         return ApiResponse.ok();
     }
 }

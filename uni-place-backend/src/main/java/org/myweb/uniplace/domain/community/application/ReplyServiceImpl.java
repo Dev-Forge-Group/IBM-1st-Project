@@ -2,6 +2,7 @@ package org.myweb.uniplace.domain.community.application;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -53,10 +54,12 @@ public class ReplyServiceImpl implements ReplyService {
 
         String me = userId;
         User author = userRepository.findById(userId).orElse(null);
+        Map<Integer, Map<String, Integer>> anonymousIds = new HashMap<>();
         Page<ReplyResponse> mapped = page.map(r -> {
             long cnt = replyLikeRepository.countByIdReplyId(r.getReplyId());
             boolean liked = replyLikeRepository.existsByIdUserIdAndIdReplyId(me, r.getReplyId());
-            return ReplyResponse.fromEntity(r, cnt, liked, author);
+            return ReplyResponse.fromEntity(r, cnt, liked, author, me, CommunityViewer.current().administrator(),
+                    anonymousIds.computeIfAbsent(r.getBoardId(), this::anonymousIds).get(r.getUserId()));
         });
         return PageResponse.of(mapped);
     }
@@ -67,13 +70,15 @@ public class ReplyServiceImpl implements ReplyService {
         List<Reply> replies = replyRepository.findByBoardIdAndParentIdIsNullOrderByCreatedAtAscReplySeqAsc(boardId);
         Map<Integer, Long> likeCountMap = loadReplyLikeCounts(replies);
         String me = tryCurrentUserId();
+        Map<String, Integer> anonymousIds = anonymousIds(boardId);
 
         return replies.stream()
             .map(r -> {
                 long cnt = likeCountMap.getOrDefault(r.getReplyId(), 0L);
                 boolean liked = (me != null) && replyLikeRepository.existsByIdUserIdAndIdReplyId(me, r.getReplyId());
                 User author = userRepository.findById(r.getUserId()).orElse(null);
-                return ReplyResponse.fromEntity(r, cnt, liked, author);
+                return ReplyResponse.fromEntity(r, cnt, liked, author, me, CommunityViewer.current().administrator(),
+                    anonymousIds.get(r.getUserId()));
             })
             .toList();
     }
@@ -84,13 +89,15 @@ public class ReplyServiceImpl implements ReplyService {
         List<Reply> replies = replyRepository.findByBoardIdAndParentIdOrderByCreatedAtAscReplySeqAsc(boardId, parentId);
         Map<Integer, Long> likeCountMap = loadReplyLikeCounts(replies);
         String me = tryCurrentUserId();
+        Map<String, Integer> anonymousIds = anonymousIds(boardId);
 
         return replies.stream()
             .map(r -> {
                 long cnt = likeCountMap.getOrDefault(r.getReplyId(), 0L);
                 boolean liked = (me != null) && replyLikeRepository.existsByIdUserIdAndIdReplyId(me, r.getReplyId());
                 User author = userRepository.findById(r.getUserId()).orElse(null);
-                return ReplyResponse.fromEntity(r, cnt, liked, author);
+                return ReplyResponse.fromEntity(r, cnt, liked, author, me, CommunityViewer.current().administrator(),
+                    anonymousIds.get(r.getUserId()));
             })
             .toList();
     }
@@ -220,17 +227,26 @@ public class ReplyServiceImpl implements ReplyService {
         return map;
     }
 
-    private String tryCurrentUserId() {
-        try {
-            return requireCurrentUserId();
-        } catch (Exception e) {
-            return null;
+    private Map<String, Integer> anonymousIds(int boardId) {
+        Board board = boardRepository.findById(boardId).orElse(null);
+        if (board == null) return Map.of();
+        Map<String, Integer> result = new LinkedHashMap<>();
+        // Linking an anonymous reply to a named board author would identify it.
+        if (board.isAnonymous()) result.put(board.getUserId(), 0);
+        int next = 1;
+        for (String author : replyRepository.findAnonymousAuthorsByBoardId(boardId)) {
+            if (!result.containsKey(author)) result.put(author, next++);
         }
+        return result;
+    }
+
+    private String tryCurrentUserId() {
+        return CommunityViewer.current().userId();
     }
 
     private String requireCurrentUserId() {
         var auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null) throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        if (auth == null || !auth.isAuthenticated()) throw new BusinessException(ErrorCode.UNAUTHORIZED);
 
         Object p = auth.getPrincipal();
         if (p instanceof AuthUser au) return au.getUserId();

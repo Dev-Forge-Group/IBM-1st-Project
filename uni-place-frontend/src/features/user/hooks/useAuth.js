@@ -80,22 +80,13 @@ export function AuthProvider({ children }) {
       }
       const me = await authApi.me();
       setUser(me ?? null);
-    } catch (e) {
-      // access 만료/불일치면 refresh 시도
-      try {
-        const { refreshToken, deviceId } = getRefreshContext();
-        if (refreshToken && deviceId) {
-          const tokens = await authApi.refresh({ refreshToken, deviceId });
-          setTokens(tokens);
-          const me = await authApi.me();
-          setUser(me ?? null);
-          return;
-        }
-      } catch {
-        // ignore
+    } catch (error) {
+      // me() already attempts one shared refresh after 401. Only a confirmed
+      // rejection ends the session; temporary failures can recover on retry.
+      if (Number(error?.status) === 401) {
+        clearTokens();
+        setUser(null);
       }
-      clearTokens();
-      setUser(null);
     } finally {
       setLoading(false);
     }

@@ -4,7 +4,6 @@ package org.myweb.uniplace.domain.reservation.application;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import org.myweb.uniplace.domain.property.domain.entity.Building;
 import org.myweb.uniplace.domain.property.domain.entity.Room;
@@ -196,6 +195,25 @@ public class TourReservationServiceImpl implements TourReservationService {
     }
 
     @Override
+    public void changeStatus(Integer tourId, TourStatus status) {
+        if (tourId == null || status == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST);
+        }
+        TourReservationEntity reservation = tourReservationRepository.findById(tourId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOUR_STATUS_NOT_FOUND));
+
+        // Restoring inactive history occupies time again; active-to-active changes must not conflict with themselves.
+        if (INACTIVE.contains(reservation.getTourSt()) && !INACTIVE.contains(status)) {
+            reservationConflictPolicy.validateDuplicateTelTime(
+                    reservation.getTourTel(), reservation.getTourStartAt(), reservation.getTourEndAt());
+            reservationConflictPolicy.validateRoomConflict(
+                    reservation.getRoom().getRoomId(), reservation.getTourStartAt(), reservation.getTourEndAt());
+        }
+        reservation.setTourSt(status);
+        tourReservationRepository.save(reservation);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public TourReservableResponse reservableSlots(Integer buildingId, Integer roomId, LocalDate date) {
 
@@ -230,10 +248,6 @@ public class TourReservationServiceImpl implements TourReservationService {
                 roomId, INACTIVE, dayStart, dayEnd
         );
 
-        Set<String> reservedKeys = reserved.stream()
-                .map(e -> key(e.getTourStartAt(), e.getTourEndAt()))
-                .collect(Collectors.toSet());
-
         List<TourReservableResponse.TimeSlotResponse> available = Arrays.stream(TourFixedSlot.values())
                 .map(slot -> {
                     LocalDateTime startAt = LocalDateTime.of(date, slot.getStart());
@@ -244,7 +258,9 @@ public class TourReservationServiceImpl implements TourReservationService {
                             .endAt(endAt)
                             .build();
                 })
-                .filter(ts -> !reservedKeys.contains(key(ts.getStartAt(), ts.getEndAt())))
+                .filter(ts -> reserved.stream().noneMatch(reservation ->
+                        ts.getStartAt().isBefore(reservation.getTourEndAt())
+                                && ts.getEndAt().isAfter(reservation.getTourStartAt())))
                 .toList();
 
         return TourReservableResponse.builder()
@@ -254,7 +270,4 @@ public class TourReservationServiceImpl implements TourReservationService {
                 .build();
     }
 
-    private static String key(LocalDateTime startAt, LocalDateTime endAt) {
-        return startAt + "|" + endAt;
-    }
 }

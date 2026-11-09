@@ -1,4 +1,4 @@
-// Entity (인덱스만 보완)
+// Entity
 // 경로: org/myweb/uniplace/domain/reservation/domain/entity/SpaceReservationEntity.java
 package org.myweb.uniplace.domain.reservation.domain.entity;
 
@@ -25,12 +25,6 @@ import lombok.*;
                 @Index(name = "ix_sr_time", columnList = "sr_start_at,sr_end_at"),
                 @Index(name = "ix_sr_building", columnList = "building_id"),
                 @Index(name = "ix_sr_space", columnList = "space_id")
-        },
-        uniqueConstraints = {
-                @UniqueConstraint(
-                        name = "uq_space_time",
-                        columnNames = { "space_id", "sr_start_at", "sr_end_at" }
-                )
         }
 )
 public class SpaceReservationEntity {
@@ -39,6 +33,10 @@ public class SpaceReservationEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "reservation_id", nullable = false)
     private Integer reservationId;
+
+    @Version
+    @Column(name = "row_version", nullable = false)
+    private Long rowVersion;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "building_id", nullable = false)

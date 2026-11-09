@@ -43,36 +43,18 @@ function typeLabel(code) {
   return code ?? '';
 }
 
-/* ── 익명 번호 매핑 ──────────────────────────────────────────
- * 백엔드 ReplyResponse:
- *   userId     = 비익명이면 닉네임, 익명이면 null
- *   realUserId = 항상 실제 userId (본인 여부 판단용)
- */
-function buildAnonMap(boardRealAuthorId, allReplies) {
-  const map = {};
-  // 게시글 작성자: 익명 댓글 작성 시 '익명(글쓴이)'로 표시
-  if (boardRealAuthorId) map[boardRealAuthorId] = '익명(글쓴이)';
-  let counter = 1;
-  for (const r of allReplies) {
-    // 익명 댓글만 번호 부여
-    const isAnon = String(r?.anonymity ?? 'N').toUpperCase() === 'Y';
-    if (!isAnon) continue;
-    const uid = r.realUserId ?? r.userId;
-    if (!uid || map[uid]) continue;
-    map[uid] = `익명${counter++}`;
-  }
-  return map;
-}
-
-function displayName(item, anonMap, { isAdmin = false } = {}) {
+function displayName(item, { isAdmin = false } = {}) {
   const isAnon = String(item?.anonymity ?? 'N').toUpperCase() === 'Y';
   // 비익명: 백엔드가 userId 필드에 닉네임을 담아서 내려줌
   if (!isAnon) return item?.userId ?? '-';
-  // 익명 + 관리자: 닉네임(userId) 그대로 표시, 없으면 realUserId
-  if (isAdmin) return item?.userId ?? item?.realUserId ?? '익명';
-  // 익명 + 일반: anonMap으로 번호 매핑
-  const realId = item?.realUserId;
-  return anonMap[realId] ?? '익명';
+  if (isAdmin && item?.realUserId) {
+    return item.realUserNickname ?? item.realUserId;
+  }
+  // 게시글 안에서만 쓰는 서버 번호다. 실제 회원 ID를 받아 비교하지 않는다.
+  if (item?.anonymousId === 0) return '익명(글쓴이)';
+  return Number.isInteger(item?.anonymousId) && item.anonymousId > 0
+    ? `익명${item.anonymousId}`
+    : '익명';
 }
 
 /* ── 대댓글 작성 박스 ───────────────────────────────────── */
@@ -161,8 +143,7 @@ function ChildWriteBox({ boardId, parentId, onCreated, onCancel, disabled }) {
 function ReplyItem({
   reply: initialReply,
   boardId,
-  myUserId,
-  anonMap,
+  isLoggedIn,
   onRefresh,
   isChild = false,
   isAdmin = false,
@@ -185,16 +166,14 @@ function ReplyItem({
       setEditAnon(String(initialReply.anonymity ?? 'N').toUpperCase() === 'Y');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialReply.replyId, initialReply.anonymity, initialReply.replyCtnt]);
+  }, [initialReply]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [children, setChildren] = useState([]);
   const [childLoading, setChildLoading] = useState(false);
 
-  // 본인 여부: realUserId 기준 (익명 댓글도 수정/삭제 가능해야 함)
-  const isMine =
-    myUserId && String(reply.realUserId ?? reply.userId) === String(myUserId);
-  const authorName = displayName(reply, anonMap, { isAdmin });
+  const isMine = isLoggedIn && reply.mine === true;
+  const authorName = displayName(reply, { isAdmin });
   const isAuthorStyle = authorName === '익명(글쓴이)';
 
   useEffect(() => {
@@ -253,7 +232,7 @@ function ReplyItem({
         replyCtnt: v,
         anonymity: editAnon ? 'Y' : 'N',
       });
-      await onRefresh(); // 댓글 목록 전체 재로드 → anonMap 재계산
+      await onRefresh();
       setEditing(false);
     } catch (e) {
       setErr(e?.message || '수정 실패');
@@ -288,7 +267,7 @@ function ReplyItem({
 
       <div className={styles.replyHeader}>
         <div className={styles.replyMeta}>
-          {isAdmin && (reply?.realUserId || reply?.userId) ? (
+          {isAdmin && reply?.realUserId ? (
             <button
               type="button"
               className={`${styles.replyAuthor} ${isAuthorStyle ? styles.replyAuthorOwner : ''}`}
@@ -299,7 +278,7 @@ function ReplyItem({
                 cursor: 'pointer',
               }}
               onClick={() =>
-                onAdminUserClick?.(reply.realUserId ?? reply.userId)
+                onAdminUserClick?.(reply.realUserId)
               }
               title="회원 정보/상태 변경"
             >
@@ -453,8 +432,7 @@ function ReplyItem({
                   key={child.replyId}
                   reply={child}
                   boardId={boardId}
-                  myUserId={myUserId}
-                  anonMap={anonMap}
+                  isLoggedIn={isLoggedIn}
                   onRefresh={async () => {
                     await loadChildren();
                     onRefresh?.();
@@ -524,16 +502,8 @@ export default function BoardDetail() {
 
   const [userStatusModalId, setUserStatusModalId] = useState(null);
 
-  // board.userId는 익명이면 "익명"으로 마스킹됨 → realAuthorId는 별도 보존
-  const [realAuthorId, setRealAuthorId] = useState('');
-  const [boardMineViaMe, setBoardMineViaMe] = useState(false);
-  const isBoardMine =
-    !!myUserId &&
-    ((!!realAuthorId && myUserId === realAuthorId) ||
-      (!realAuthorId && boardMineViaMe));
-
-  // 익명 번호 맵: 루트 댓글 기준으로 계산
-  const anonMap = buildAnonMap(realAuthorId, replies);
+  const realAuthorId = board?.realUserId;
+  const isBoardMine = isLoggedIn && board?.mine === true;
 
   const fetchCount = useRef(0);
 
@@ -547,13 +517,6 @@ export default function BoardDetail() {
       setLiked(data?.likedByMe ?? false);
       likedRef.current = data?.likedByMe ?? false;
       setLikeCount(data?.likeCount ?? 0);
-      setBoardMineViaMe(false);
-      const nextRealAuthorId =
-        data?.realUserId ??
-        (String(data?.anonymity ?? 'N').toUpperCase() === 'Y'
-          ? ''
-          : (data?.userId ?? ''));
-      setRealAuthorId(nextRealAuthorId);
     } catch {
       // ignore
     }
@@ -591,15 +554,6 @@ export default function BoardDetail() {
         setLiked(data?.likedByMe ?? false);
         likedRef.current = data?.likedByMe ?? false;
         setLikeCount(data?.likeCount ?? 0);
-        // ✅ admin이면 백엔드에서 realUserId(userId) 내려올 수 있음
-        // ✅ 익명 게시글인데 realUserId를 못 받는 경우, /boards/me 목록으로 본인 여부 판별
-        setBoardMineViaMe(false);
-        const nextRealAuthorId =
-          data?.realUserId ??
-          (String(data?.anonymity ?? 'N').toUpperCase() === 'Y'
-            ? ''
-            : (data?.userId ?? ''));
-        setRealAuthorId(nextRealAuthorId);
         return loadReplies();
       })
       .catch((e) => {
@@ -612,51 +566,6 @@ export default function BoardDetail() {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId, loadReplies]);
-
-  // ✅ 익명 게시글인데 realUserId를 못 받은 경우: 내 작성글 목록(/boards/me)에서 boardId가 있는지로 본인 여부 추정
-  useEffect(() => {
-    if (!isLoggedIn) return;
-    if (!boardId) return;
-    if (String(board?.anonymity ?? 'N').toUpperCase() !== 'Y') return;
-    if (realAuthorId) return;
-
-    let mounted = true;
-    (async () => {
-      try {
-        let p = 1;
-        let total = 1;
-        const size = 50;
-        const limitPages = 10;
-
-        while (p <= total && p <= limitPages) {
-          const pageRes = await communityApi.myBoards({
-            page: p,
-            size,
-            boardType: 'ALL',
-          });
-          const content = Array.isArray(pageRes?.content)
-            ? pageRes.content
-            : [];
-          total = Math.max(1, Number(pageRes?.totalPages ?? 1));
-          const found = content.some(
-            (it) => String(it?.boardId ?? it?.id) === String(boardId)
-          );
-          if (found) {
-            if (mounted) setBoardMineViaMe(true);
-            return;
-          }
-          p += 1;
-        }
-        if (mounted) setBoardMineViaMe(false);
-      } catch {
-        if (mounted) setBoardMineViaMe(false);
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [isLoggedIn, boardId, board?.anonymity, realAuthorId]);
 
   // ✅ 내가 작성한 글이면(익명 포함) 상세에서 수정/삭제 표시
   const showBoardActions = isBoardMine;
@@ -762,7 +671,7 @@ export default function BoardDetail() {
 
   /* 게시글 작성자 표시
    * userId          = 익명이면 "익명(글쓴이)", 비익명이면 닉네임
-   * realUserNickname = 항상 실제 닉네임 (어드민용)
+   * 익명 글의 realUserNickname/realUserId는 관리자 응답에만 포함된다.
    */
   const boardAuthorLabel = isAdmin
     ? (board?.realUserNickname ?? board?.realUserId ?? '-') // 어드민: 항상 실제 닉네임
@@ -796,7 +705,7 @@ export default function BoardDetail() {
                 <div className={styles.articleInfo}>
                   <span className={styles.infoItem}>
                     ✍{' '}
-                    {isAdmin && (realAuthorId || board?.userId) ? (
+                    {isAdmin && realAuthorId ? (
                       <button
                         type="button"
                         className={styles.replyAuthor}
@@ -807,7 +716,7 @@ export default function BoardDetail() {
                           cursor: 'pointer',
                         }}
                         onClick={() =>
-                          setUserStatusModalId(realAuthorId || board.userId)
+                          setUserStatusModalId(realAuthorId)
                         }
                         title="회원 정보/상태 변경"
                       >
@@ -1041,8 +950,7 @@ export default function BoardDetail() {
                       key={r.replyId}
                       reply={r}
                       boardId={Number(boardId)}
-                      myUserId={myUserId}
-                      anonMap={anonMap}
+                      isLoggedIn={isLoggedIn}
                       onRefresh={loadReplies}
                       isAdmin={isAdmin}
                       disabledWrite={isBanned}

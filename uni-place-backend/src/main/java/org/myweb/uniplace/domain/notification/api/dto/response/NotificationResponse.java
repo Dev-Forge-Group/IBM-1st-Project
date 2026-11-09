@@ -33,11 +33,15 @@ public class NotificationResponse {
     private Long createdAtMs;
 
     public static NotificationResponse from(Notification n) {
+        // Historical alerts retain the sender even when a reply later becomes
+        // anonymous. Hide it on every read, including for administrator recipients.
+        boolean communityReply = "BRD_REPLY".equalsIgnoreCase(n.getCode())
+                || "BRD_REREPLY".equalsIgnoreCase(n.getCode());
         return NotificationResponse.builder()
                 .notificationId(n.getNotificationId())
                 .receiverId(n.getReceiverId())
                 .code(n.getCode())
-                .senderId(n.getSenderId())
+                .senderId(communityReply ? null : n.getSenderId())
                 .message(n.getMessage())
                 .target(n.getTarget() != null ? n.getTarget().name() : null)
                 .targetId(n.getTargetId())

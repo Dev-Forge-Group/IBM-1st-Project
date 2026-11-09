@@ -6,12 +6,11 @@ import java.util.List;
 
 import org.myweb.uniplace.domain.notification.api.dto.response.NotificationListResponse;
 import org.myweb.uniplace.domain.notification.api.dto.response.NotificationResponse;
+import org.myweb.uniplace.domain.notification.application.publicapi.NotificationRecipient;
+import org.myweb.uniplace.domain.notification.application.publicapi.NotificationRecipients;
 import org.myweb.uniplace.domain.notification.domain.entity.Notification;
 import org.myweb.uniplace.domain.notification.domain.enums.TargetType;
 import org.myweb.uniplace.domain.notification.repository.NotificationRepository;
-import org.myweb.uniplace.domain.user.domain.entity.User;
-import org.myweb.uniplace.domain.user.domain.enums.UserRole;
-import org.myweb.uniplace.domain.user.repository.UserRepository;
 import org.myweb.uniplace.global.exception.BusinessException;
 import org.myweb.uniplace.global.exception.ErrorCode;
 import org.myweb.uniplace.global.response.PageResponse;
@@ -28,7 +27,7 @@ import lombok.RequiredArgsConstructor;
 public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository notificationRepository;
-    private final UserRepository userRepository;
+    private final NotificationRecipients notificationRecipients;
     private final NotificationFactory notificationFactory;
 
     @Override
@@ -85,10 +84,10 @@ public class NotificationServiceImpl implements NotificationService {
                            Integer targetId,
                            String urlPath) {
 
-        User receiver = userRepository.findById(receiverId)
+        NotificationRecipient receiver = notificationRecipients.findById(receiverId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
-        if ("Y".equalsIgnoreCase(receiver.getDeleteYN())) return;
+        if (receiver.deleted()) return;
 
         Notification n = notificationFactory.create(receiverId, code, message, senderId, target, targetId, urlPath);
         notificationRepository.save(n);
@@ -103,12 +102,12 @@ public class NotificationServiceImpl implements NotificationService {
                              Integer targetId,
                              String urlPath) {
 
-        List<User> admins = userRepository.findAllByUserRole(UserRole.admin);
-        for (User admin : admins) {
-            if ("Y".equalsIgnoreCase(admin.getDeleteYN())) continue;
+        List<NotificationRecipient> admins = notificationRecipients.findAdministrators();
+        for (NotificationRecipient admin : admins) {
+            if (admin.deleted()) continue;
 
             Notification n = notificationFactory.create(
-                    admin.getUserId(),
+                    admin.userId(),
                     code,
                     message,
                     senderId,
