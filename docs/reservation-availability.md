@@ -8,4 +8,4 @@
 
 `ReservationAvailabilityIntegrationTest`는 실제 MySQL/Flyway와 공개 서비스를 사용해 두 제품의 비정형 이력·인접 시간·비활성 상태·다른 대상 격리·날짜 경계·정상 생성을 검사한다. property 목록 공급과 Notification/Slack은 mock한다. 기존 코드에서 6개 중 5개가 실패했고, 수정 뒤 6개 모두 통과했다. CI는 이 suite가 누락되거나 skip이면 실패한다.
 
-이번 변경은 가용 시간 조회와 입력 검증의 수선이다. 동시 요청의 최종 성공 여부를 가용 시간 목록이 보장하지는 않는다. 공용공간의 활성 슬롯 유일성과 버전은 기존 [V15 계약](space-reservation-concurrency.md)을 유지한다. 투어의 전화번호 정규화·관리자 복구·동시성은 별도의 정책 및 회귀 작업 대상이다. 새 DB 마이그레이션은 추가하지 않았다.
+이번 변경은 가용 시간 조회와 입력 검증의 수선이다. 동시 요청의 최종 성공 여부를 가용 시간 목록이 보장하지는 않는다. 공용공간의 활성 슬롯 유일성과 버전은 기존 [V15 계약](space-reservation-concurrency.md)을 유지한다. 투어의 [전화 표기 호환](tour-telephone-compatibility.md)과 [관리자 복구](tour-admin-restoration.md)는 각 계약과 실제 MySQL 회귀에서 검증한다. 모든 Tour writer의 동시성은 [IBM-03](development-plan.md)의 별도 작업이다. 새 DB 마이그레이션은 추가하지 않았다.

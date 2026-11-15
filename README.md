@@ -2,7 +2,7 @@ Dev with : 설진웅, 이주용, 이정빈, 황현지
 
 커뮤니티 API: [익명 작성자 응답·소유권 계약](docs/community-privacy.md)
 
-개발 검증: [PR CI](docs/ci.md) · [읽기 전용 모듈 계약](docs/module-boundaries.md) · [공간 예약 동시성](docs/space-reservation-concurrency.md) · [예약 가용 시간](docs/reservation-availability.md) · [관리자 투어 복구](docs/tour-admin-restoration.md)
+개발 검증: [PR CI](docs/ci.md) · [읽기 전용 모듈 계약](docs/module-boundaries.md) · [공간 예약 동시성](docs/space-reservation-concurrency.md) · [예약 가용 시간](docs/reservation-availability.md) · [관리자 투어 복구](docs/tour-admin-restoration.md) · [투어 전화 표기 호환](docs/tour-telephone-compatibility.md) · [개발 실행계획](docs/development-plan.md)
 
 v1 : 2026.01.13 ~ 2026.03.31
 

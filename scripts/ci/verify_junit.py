@@ -16,6 +16,7 @@ REQUIRED_SUITES = (
     "org.myweb.uniplace.domain.reservation.application.SpaceReservationConcurrencyIntegrationTest",
     "org.myweb.uniplace.domain.reservation.application.ReservationAvailabilityIntegrationTest",
     "org.myweb.uniplace.domain.reservation.api.admin.AdminTourRestorationIntegrationTest",
+    "org.myweb.uniplace.domain.reservation.api.TourTelephoneCompatibilityIntegrationTest",
 )
 COUNTERS = ("tests", "failures", "errors", "skipped")
 

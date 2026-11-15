@@ -8,6 +8,7 @@ import java.util.List;
 
 import org.myweb.uniplace.domain.reservation.domain.entity.TourReservationEntity;
 import org.myweb.uniplace.domain.reservation.domain.enums.TourStatus;
+import org.myweb.uniplace.domain.reservation.domain.policy.TourTelephone;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -17,6 +18,16 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface TourReservationRepository extends JpaRepository<TourReservationEntity, Integer> {
+
+    // Keep the legacy raw comparison. The new presentation branch compares phone and PIN bytes,
+    // so MySQL's case/accent-insensitive collation cannot introduce extra credential aliases.
+    String CREDENTIAL_MATCH = """
+        t.tourPwd = :tourPwd
+        and (t.tourTel = :tourTel
+             or (:canonicalTel is not null
+                 and function('hex', replace(t.tourTel, '-', '')) = function('hex', :canonicalTel)
+                 and function('hex', t.tourPwd) = function('hex', :tourPwd)))
+        """;
 
     @Query("""
         select count(t) > 0
@@ -47,27 +58,68 @@ public interface TourReservationRepository extends JpaRepository<TourReservation
             @Param("dayEnd") LocalDateTime dayEnd
     );
 
-    Page<TourReservationEntity> findByTourTelAndTourPwdAndTourStNotIn(
+    default Page<TourReservationEntity> findByTourTelAndTourPwdAndTourStNotIn(
             String tourTel,
             String tourPwd,
             Collection<TourStatus> inactive,
             Pageable pageable
-    );
+    ) {
+        return findCompatibleActiveTelephone(tourTel, tourPwd,
+                TourTelephone.canonicalForCredentials(tourTel, tourPwd), inactive, pageable);
+    }
+
+    @Query(value = "select t from TourReservationEntity t where " + CREDENTIAL_MATCH + " and t.tourSt not in :inactive",
+           countQuery = "select count(t) from TourReservationEntity t where " + CREDENTIAL_MATCH + " and t.tourSt not in :inactive")
+    Page<TourReservationEntity> findCompatibleActiveTelephone(
+            @Param("tourTel") String tourTel, @Param("tourPwd") String tourPwd,
+            @Param("canonicalTel") String canonicalTel, @Param("inactive") Collection<TourStatus> inactive,
+            Pageable pageable);
 
     // 전체 상태 조회 (취소/완료 포함)
-    Page<TourReservationEntity> findByTourTelAndTourPwd(
+    default Page<TourReservationEntity> findByTourTelAndTourPwd(
             String tourTel,
             String tourPwd,
             Pageable pageable
-    );
+    ) {
+        return findCompatibleTelephone(tourTel, tourPwd,
+                TourTelephone.canonicalForCredentials(tourTel, tourPwd), pageable);
+    }
 
-    TourReservationEntity findByTourIdAndTourTelAndTourPwd(Integer tourId, String tourTel, String tourPwd);
+    @Query(value = "select t from TourReservationEntity t where " + CREDENTIAL_MATCH,
+           countQuery = "select count(t) from TourReservationEntity t where " + CREDENTIAL_MATCH)
+    Page<TourReservationEntity> findCompatibleTelephone(
+            @Param("tourTel") String tourTel, @Param("tourPwd") String tourPwd,
+            @Param("canonicalTel") String canonicalTel, Pageable pageable);
+
+    default TourReservationEntity findByTourIdAndTourTelAndTourPwd(Integer tourId, String tourTel, String tourPwd) {
+        return findCompatibleTelephoneById(tourId, tourTel, tourPwd,
+                TourTelephone.canonicalForCredentials(tourTel, tourPwd));
+    }
+
+    @Query("select t from TourReservationEntity t where t.tourId = :tourId and " + CREDENTIAL_MATCH)
+    TourReservationEntity findCompatibleTelephoneById(
+            @Param("tourId") Integer tourId, @Param("tourTel") String tourTel,
+            @Param("tourPwd") String tourPwd, @Param("canonicalTel") String canonicalTel);
     
-    boolean existsByTourTelAndTourStartAtAndTourEndAtAndTourStNotIn(
+    default boolean existsByTourTelAndTourStartAtAndTourEndAtAndTourStNotIn(
             String tourTel,
             LocalDateTime tourStartAt,
             LocalDateTime tourEndAt,
             Collection<TourStatus> inactive
-    );
+    ) {
+        return existsCompatibleTelephoneTime(tourTel, TourTelephone.canonical(tourTel), tourStartAt, tourEndAt, inactive);
+    }
+
+    @Query("""
+        select count(t) > 0 from TourReservationEntity t
+         where (t.tourTel = :tourTel
+                or (:canonicalTel is not null
+                    and function('hex', replace(t.tourTel, '-', '')) = function('hex', :canonicalTel)))
+           and t.tourStartAt = :startAt and t.tourEndAt = :endAt and t.tourSt not in :inactive
+        """)
+    boolean existsCompatibleTelephoneTime(
+            @Param("tourTel") String tourTel, @Param("canonicalTel") String canonicalTel,
+            @Param("startAt") LocalDateTime startAt, @Param("endAt") LocalDateTime endAt,
+            @Param("inactive") Collection<TourStatus> inactive);
     
 }
