@@ -5,6 +5,9 @@ package org.myweb.uniplace.domain.reservation.repository;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
+
+import jakarta.persistence.LockModeType;
 
 import org.myweb.uniplace.domain.reservation.domain.entity.TourReservationEntity;
 import org.myweb.uniplace.domain.reservation.domain.enums.TourStatus;
@@ -18,6 +21,12 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface TourReservationRepository extends JpaRepository<TourReservationEntity, Integer> {
+
+    String TELEPHONE_MATCH = """
+        (t.tourTel = :tourTel
+         or (:canonicalTel is not null
+             and function('hex', replace(t.tourTel, '-', '')) = function('hex', :canonicalTel)))
+        """;
 
     // Keep the legacy raw comparison. The new presentation branch compares phone and PIN bytes,
     // so MySQL's case/accent-insensitive collation cannot introduce extra credential aliases.
@@ -42,6 +51,18 @@ public interface TourReservationRepository extends JpaRepository<TourReservation
             @Param("startAt") LocalDateTime startAt,
             @Param("endAt") LocalDateTime endAt
     );
+
+    // Locking reads see committed changes even when a REQUIRED caller already opened an RR snapshot.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        select t from TourReservationEntity t
+         where t.room.roomId = :roomId and t.tourSt not in :inactive
+           and :startAt < t.tourEndAt and :endAt > t.tourStartAt
+        """)
+    List<TourReservationEntity> findRoomConflictsForUpdate(
+            @Param("roomId") Integer roomId, @Param("inactive") Collection<TourStatus> inactive,
+            @Param("startAt") LocalDateTime startAt, @Param("endAt") LocalDateTime endAt,
+            Pageable pageable);
 
     @Query("""
         select t
@@ -100,6 +121,21 @@ public interface TourReservationRepository extends JpaRepository<TourReservation
     TourReservationEntity findCompatibleTelephoneById(
             @Param("tourId") Integer tourId, @Param("tourTel") String tourTel,
             @Param("tourPwd") String tourPwd, @Param("canonicalTel") String canonicalTel);
+
+    default TourReservationEntity lockByTourIdAndTelephoneCredentials(Integer tourId, String tourTel, String tourPwd) {
+        return lockCompatibleTelephoneById(tourId, tourTel, tourPwd,
+                TourTelephone.canonicalForCredentials(tourTel, tourPwd));
+    }
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from TourReservationEntity t where t.tourId = :tourId and " + CREDENTIAL_MATCH)
+    TourReservationEntity lockCompatibleTelephoneById(
+            @Param("tourId") Integer tourId, @Param("tourTel") String tourTel,
+            @Param("tourPwd") String tourPwd, @Param("canonicalTel") String canonicalTel);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from TourReservationEntity t where t.tourId = :tourId")
+    Optional<TourReservationEntity> lockByTourId(@Param("tourId") Integer tourId);
     
     default boolean existsByTourTelAndTourStartAtAndTourEndAtAndTourStNotIn(
             String tourTel,
@@ -110,16 +146,19 @@ public interface TourReservationRepository extends JpaRepository<TourReservation
         return existsCompatibleTelephoneTime(tourTel, TourTelephone.canonical(tourTel), tourStartAt, tourEndAt, inactive);
     }
 
-    @Query("""
-        select count(t) > 0 from TourReservationEntity t
-         where (t.tourTel = :tourTel
-                or (:canonicalTel is not null
-                    and function('hex', replace(t.tourTel, '-', '')) = function('hex', :canonicalTel)))
-           and t.tourStartAt = :startAt and t.tourEndAt = :endAt and t.tourSt not in :inactive
-        """)
+    @Query("select count(t) > 0 from TourReservationEntity t where " + TELEPHONE_MATCH
+            + " and t.tourStartAt = :startAt and t.tourEndAt = :endAt and t.tourSt not in :inactive")
     boolean existsCompatibleTelephoneTime(
             @Param("tourTel") String tourTel, @Param("canonicalTel") String canonicalTel,
             @Param("startAt") LocalDateTime startAt, @Param("endAt") LocalDateTime endAt,
             @Param("inactive") Collection<TourStatus> inactive);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from TourReservationEntity t where " + TELEPHONE_MATCH
+            + " and t.tourStartAt = :startAt and t.tourEndAt = :endAt and t.tourSt not in :inactive")
+    List<TourReservationEntity> findTelephoneTimeConflictsForUpdate(
+            @Param("tourTel") String tourTel, @Param("canonicalTel") String canonicalTel,
+            @Param("startAt") LocalDateTime startAt, @Param("endAt") LocalDateTime endAt,
+            @Param("inactive") Collection<TourStatus> inactive, Pageable pageable);
     
 }

@@ -189,9 +189,11 @@ class ReservationAvailabilityIntegrationTest {
         for (Integer id : List.of(first.getTourId(), second.getTourId())) {
             verify(notifications).notifyAdmins(eq("TOUR_REQ"), any(String.class), isNull(), eq(TargetType.tour),
                     eq(id), eq("/admin/tour-reservations"));
-            verify(slack).sendTourReservationAlert(eq(id), eq("Fixture visitor"), eq("010-5555-1234"), any(String.class));
         }
-        verifyNoMoreInteractions(notifications, slack);
+        // The surrounding test transaction has not committed; external alerts are deferred.
+        // Committed delivery and rollback behavior are covered by TourReservationConcurrencyIntegrationTest.
+        verifyNoInteractions(slack);
+        verifyNoMoreInteractions(notifications);
     }
 
     private List<LocalDateTime> tourStarts() {

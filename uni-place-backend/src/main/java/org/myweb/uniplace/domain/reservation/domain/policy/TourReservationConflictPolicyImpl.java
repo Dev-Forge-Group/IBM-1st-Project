@@ -9,6 +9,7 @@ import org.myweb.uniplace.domain.reservation.repository.TourReservationRepositor
 import org.myweb.uniplace.global.exception.BusinessException;
 import org.myweb.uniplace.global.exception.ErrorCode;
 import org.springframework.stereotype.Component;
+import org.springframework.data.domain.PageRequest;
 
 import lombok.RequiredArgsConstructor;
 
@@ -19,10 +20,12 @@ public class TourReservationConflictPolicyImpl implements TourReservationConflic
     private final TourReservationRepository tourReservationRepository;
 
     private static final List<TourStatus> INACTIVE = List.of(TourStatus.cancelled, TourStatus.ended);
+    private static final PageRequest FIRST_CONFLICT = PageRequest.of(0, 1);
 
     @Override
     public void validateRoomConflict(Integer roomId, LocalDateTime startAt, LocalDateTime endAt) {
-        boolean exists = tourReservationRepository.existsRoomTimeConflict(roomId, INACTIVE, startAt, endAt);
+        boolean exists = !tourReservationRepository.findRoomConflictsForUpdate(
+                roomId, INACTIVE, startAt, endAt, FIRST_CONFLICT).isEmpty();
         if (exists) {
             throw new BusinessException(ErrorCode.TOUR_RESERVATION_TIME_CONFLICT);
         }
@@ -30,9 +33,8 @@ public class TourReservationConflictPolicyImpl implements TourReservationConflic
 
     @Override
     public void validateDuplicateTelTime(String tourTel, LocalDateTime startAt, LocalDateTime endAt) {
-        boolean exists = tourReservationRepository.existsByTourTelAndTourStartAtAndTourEndAtAndTourStNotIn(
-                tourTel, startAt, endAt, INACTIVE
-        );
+        boolean exists = !tourReservationRepository.findTelephoneTimeConflictsForUpdate(
+                tourTel, TourTelephone.canonical(tourTel), startAt, endAt, INACTIVE, FIRST_CONFLICT).isEmpty();
         if (exists) {
             throw new BusinessException(ErrorCode.TOUR_RESERVATION_DUPLICATE); // TOUR_RESERVATION_DUPLICATE 등으로 분리 가능
         }

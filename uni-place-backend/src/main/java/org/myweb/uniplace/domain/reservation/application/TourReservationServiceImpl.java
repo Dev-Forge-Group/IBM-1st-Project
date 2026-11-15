@@ -5,6 +5,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.PersistenceContext;
+
 import org.myweb.uniplace.domain.property.domain.entity.Building;
 import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.domain.property.domain.enums.RoomStatus;
@@ -33,11 +37,16 @@ import org.myweb.uniplace.global.slack.SlackNotificationService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 @Transactional
 public class TourReservationServiceImpl implements TourReservationService {
@@ -45,6 +54,10 @@ public class TourReservationServiceImpl implements TourReservationService {
     private final TourReservationRepository tourReservationRepository;
     private final BuildingRepository buildingRepository;
     private final RoomRepository roomRepository;
+    private final JdbcTemplate jdbc;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     private final ReservationValidator reservationValidator;
     private final TourReservationConflictPolicy reservationConflictPolicy;
@@ -63,6 +76,8 @@ public class TourReservationServiceImpl implements TourReservationService {
 
         reservationValidator.validateTourTime(request.getTourStartAt(), request.getTourEndAt());
         reservationValidator.validateTourFixedSlot(request.getTourStartAt(), request.getTourEndAt());
+
+        lockWrites();
 
         Building building = buildingRepository.findById(request.getBuildingId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.BUILDING_NOT_FOUND));
@@ -100,7 +115,7 @@ public class TourReservationServiceImpl implements TourReservationService {
                 request.getTourEndAt()
         );
 
-        TourReservationEntity saved = tourReservationRepository.save(
+        TourReservationEntity saved = tourReservationRepository.saveAndFlush(
                 TourReservationEntity.builder()
                         .building(building)
                         .room(room)
@@ -128,12 +143,7 @@ public class TourReservationServiceImpl implements TourReservationService {
                 "/admin/tour-reservations"
         );
         
-        slackNotificationService.sendTourReservationAlert(
-        	    saved.getTourId(),
-        	    saved.getTourNm(),
-        	    saved.getTourTel(),
-        	    timeMsg
-        	);
+        notifySlackAfterCommit(saved, timeMsg);
 
         return TourReservationResponse.fromEntity(saved);
     }
@@ -158,7 +168,8 @@ public class TourReservationServiceImpl implements TourReservationService {
     @Override
     public TourReservationResponse cancel(Integer tourId, CancelTourReservationRequest request) {
 
-        TourReservationEntity resv = tourReservationRepository.findByTourIdAndTourTelAndTourPwd(
+        lockWrites();
+        TourReservationEntity resv = tourReservationRepository.lockByTourIdAndTelephoneCredentials(
                 tourId,
                 request.getTourTel(),
                 request.getTourPwd()
@@ -168,6 +179,9 @@ public class TourReservationServiceImpl implements TourReservationService {
             throw new BusinessException(ErrorCode.TOUR_RESERVATION_ALREADY_CANCELLED);
         }
 
+        // A locking query may return an entity already held in the caller's first-level cache.
+        entityManager.refresh(resv, LockModeType.PESSIMISTIC_WRITE);
+
         if (resv.getTourSt() == TourStatus.cancelled) {
             return TourReservationResponse.fromEntity(resv);
         }
@@ -176,6 +190,7 @@ public class TourReservationServiceImpl implements TourReservationService {
         }
 
         resv.setTourSt(TourStatus.cancelled);
+        tourReservationRepository.flush();
 
         String timeMsg = resv.getTourStartAt() + " ~ " + resv.getTourEndAt();
 
@@ -199,8 +214,10 @@ public class TourReservationServiceImpl implements TourReservationService {
         if (tourId == null || status == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST);
         }
-        TourReservationEntity reservation = tourReservationRepository.findById(tourId)
+        lockWrites();
+        TourReservationEntity reservation = tourReservationRepository.lockByTourId(tourId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOUR_STATUS_NOT_FOUND));
+        entityManager.refresh(reservation, LockModeType.PESSIMISTIC_WRITE);
 
         // Restoring inactive history occupies time again; active-to-active changes must not conflict with themselves.
         if (INACTIVE.contains(reservation.getTourSt()) && !INACTIVE.contains(status)) {
@@ -210,7 +227,35 @@ public class TourReservationServiceImpl implements TourReservationService {
                     reservation.getRoom().getRoomId(), reservation.getTourStartAt(), reservation.getTourEndAt());
         }
         reservation.setTourSt(status);
-        tourReservationRepository.save(reservation);
+        tourReservationRepository.saveAndFlush(reservation);
+    }
+
+    private void lockWrites() {
+        // JdbcTemplate participates in this JPA transaction without flushing stale managed rows first.
+        // The seeded row must exist: do not silently continue or create it on demand.
+        Integer guard = jdbc.queryForObject(
+                "SELECT guard_id FROM tour_reservation_write_guard WHERE guard_id = 1 FOR UPDATE", Integer.class);
+        if (!Integer.valueOf(1).equals(guard)) {
+            throw new IllegalStateException("Tour reservation write guard is missing");
+        }
+    }
+
+    private void notifySlackAfterCommit(TourReservationEntity saved, String timeMsg) {
+        Integer id = saved.getTourId();
+        String name = saved.getTourNm();
+        String telephone = saved.getTourTel();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    slackNotificationService.sendTourReservationAlert(id, name, telephone, timeMsg);
+                } catch (RuntimeException failure) {
+                    // A delivery failure must not turn an already committed reservation into an error response.
+                    log.warn("Tour Slack alert failed after commit. tourId={}, type={}", id,
+                            failure.getClass().getSimpleName());
+                }
+            }
+        });
     }
 
     @Override

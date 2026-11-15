@@ -8,4 +8,4 @@
 
 `AdminTourRestorationIntegrationTest`는 실제 JWT·SecurityFilterChain·MockMvc·MySQL/Flyway로 exact/legacy 방 충돌·다른 방의 전역 전화 중복·정상 복구·접근 거절·404·성공 응답을 검사한다. 외부 Notification/Slack은 mock한다.
 
-이번 보장은 순차 복구의 정책 일치다. 전화 표기 호환은 [IBM-02](tour-telephone-compatibility.md)에서 연결했다. 동시에 실행되는 생성/복구·오래된 상태 쓰기는 IBM-03의 별도 작업이다. 새 DB migration·endpoint·권한 모델은 추가하지 않았다.
+순차 복구의 전화 표기 호환은 [IBM-02](tour-telephone-compatibility.md)에서 연결했다. [IBM-03](tour-reservation-concurrency.md)은 V16 guard와 current read·대상 refresh로 생성/복구/취소/상태 변경을 직렬화한다. 외부 트랜잭션에 오래된 snapshot이나 관리 엔티티가 있어도 잠금 뒤 실제 상태로 복구 검사를 수행한다. expectedVersion 없는 오래된 UI의 의도 자체를 구별하지는 않는다. endpoint·권한 모델은 유지한다.

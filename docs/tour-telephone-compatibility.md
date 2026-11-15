@@ -21,4 +21,4 @@
 
 `TourTelephoneCompatibilityIntegrationTest`는 실제 MySQL·Flyway·JWT/MockMvc에서 양방향 조회·취소, 원문 보존, 비표준 하이픈 과거 이력, 다른 방 중복과 관리자 복구, PIN·Unicode 경계, inactive 이력, camelCase 정렬·페이지 count, 실제 `MyTourUseCase`의 첫10개·빈 목록을 검사한다. 외부 AI·알림·Slack은 mock하며 credential을 테스트 출력에 남기지 않는다. `TourTelephoneTest`는 지원 표현과 unsupported 입력·직접 소비 PIN 경계를 검사한다. CI는 이 MySQL suite가 누락·0개·skip이면 실패한다.
 
-이 변경은 순차 요청의 표기 호환이다. 전화 유일성 DB 제약이나 모든 Tour writer의 동시성 보장을 추가하지 않았다. 함수 비교는 원시 전화 인덱스를 그대로 활용하기 어려우므로 운영 규모의 실행 계획과 조회 비용을 별도로 확인해야 한다. 정규 키의 backfill·인덱스·경쟁 제어는 IBM-03에서 다루며, 새 DB migration은 없다.
+IBM-02 자체는 전화 유일성 DB 제약이나 migration을 추가하지 않은 표기 호환 변경이다. [IBM-03](tour-reservation-concurrency.md)은 이 비교를 유지하며 V16 guard와 current read로 신규 서비스의 Tour 쓰기를 직렬화한다. 전화 정규 키·backfill·유일 인덱스는 추가하지 않았다. 함수 비교는 원시 전화 인덱스를 그대로 활용하기 어려우므로 운영 규모의 실행 계획·조회 비용·잠금 대기를 별도로 확인해야 한다.

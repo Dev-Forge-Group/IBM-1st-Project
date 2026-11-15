@@ -24,13 +24,6 @@ import lombok.*;
                 @Index(name = "ix_room_reservation_room", columnList = "room_id"),
                 @Index(name = "ix_room_reservation_time", columnList = "tour_start_at,tour_end_at"),
                 @Index(name = "ix_room_reservation_tel_pwd", columnList = "tour_tel,tour_pwd")
-        },
-        uniqueConstraints = {
-                // SQL 그대로: (room_id, tour_start_at, tour_end_at)
-                @UniqueConstraint(
-                        name = "uq_room_reservation_room_time",
-                        columnNames = { "room_id", "tour_start_at", "tour_end_at" }
-                )
         }
 )
 public class TourReservationEntity {

@@ -32,6 +32,7 @@ python3 ../scripts/ci/verify_junit.py build/test-results/test
 - `ReservationAvailabilityIntegrationTest`: 투어·공용공간의 예약 가능 목록과 엄격 겹침 정책, 비정형 과거 이력, 같은 날짜의 투어 입력.
 - `AdminTourRestorationIntegrationTest`: 실제 JWT·관리자 보안 필터·HTTP·MySQL에서 투어 복구 충돌, 정상 전이·거절 및 상태 보존.
 - `TourTelephoneCompatibilityIntegrationTest`: 실제 MySQL에서 전화 표기 호환·기존 원문 보존·조회/취소/중복·관리자 복구·페이지 정렬과 count·AI 직접 조회 및 잘못된 credential의 거절.
+- `TourReservationConcurrencyIntegrationTest`: 실제 MySQL에서 외부 REPEATABLE READ snapshot·오래된 관리 엔티티를 가진 생성/복구/취소 경쟁, 전화 별칭·legacy overlap·inactive 재사용, commit 이후 Slack과 DB 잠금 해제.
 
 다른 선택 검사에서 의도적으로 skip한 항목은 통과 수와 분리해 집계한다. 전체 JUnit 결과의 실패·오류는 항상 실패로 처리한다. 검사기 자체의 거짓 통과 방지 회귀는 다음과 같이 실행한다.
 
