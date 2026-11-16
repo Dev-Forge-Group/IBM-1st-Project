@@ -9,6 +9,7 @@ import org.myweb.uniplace.domain.user.repository.UserRepository;
 import org.myweb.uniplace.global.exception.BusinessException;
 import org.myweb.uniplace.global.exception.ErrorCode;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -51,26 +52,24 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         // 1) Signature/expiration validation.
         jwtProvider.validate(token);
 
-        // 2) Access token type validation.
-        String typ = jwtProvider.getTokenType(token);
-        if (!"access".equals(typ)) {
-            throw new BusinessException(ErrorCode.TOKEN_TYPE_INVALID);
-        }
+        // 2) Validate access type and required claims before looking up a member.
+        Authentication authentication = jwtProvider.getAuthentication(token);
+        AuthUser tokenPrincipal = (AuthUser) authentication.getPrincipal();
 
-        // 3) User state validation (guest skips DB lookup).
-        String role = jwtProvider.getRole(token);
-        boolean guestRole = role != null && "guest".equalsIgnoreCase(role);
+        // 3) Guests keep their signed guest identity; member roles come from the DB.
+        boolean guestRole = "guest".equalsIgnoreCase(tokenPrincipal.getRole());
         if (!guestRole) {
-            String userId = jwtProvider.getSubject(token);
-            User user = userRepository.findById(userId)
+            User user = userRepository.findById(tokenPrincipal.getUserId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
-            if (!user.canLogin()) {
+            if (!user.canLogin() || user.getUserRole() == null) {
                 throw new BusinessException(ErrorCode.UNAUTHORIZED);
             }
+            AuthUser currentPrincipal = new AuthUser(user.getUserId(), user.getUserRole().name());
+            authentication = UsernamePasswordAuthenticationToken.authenticated(
+                currentPrincipal, null, currentPrincipal.getAuthorities());
         }
 
-        // 4) Build authentication and set security context.
-        Authentication authentication = jwtProvider.getAuthentication(token);
+        // 4) Publish the same current role to principal consumers and authorization checks.
         SecurityContextHolder.getContext().setAuthentication(authentication);
 
         filterChain.doFilter(request, response);

@@ -32,6 +32,6 @@ IBM-05는 계약을 비활성화할 때 같은 방의 다른 active 계약이 �
 
 이 변경은 스케줄러 한 트랜잭션과 순차 관리자 변경의 정합성 수선이다. 모든 계약 writer의 동시 실행, 오래된 외부 REPEATABLE READ snapshot, 오래된 화면의 변경 의도를 검출하는 version 계약을 추가하지 않는다. [투어의 V16 쓰기 잠금](tour-reservation-concurrency.md)을 계약 writer의 동시성 보장으로 해석하지 않는다.
 
-`ContractLifecycleIntegrationTest`는 실제 MySQL·Flyway와 계약 서비스를 사용해 스케줄러 교체, 관리자 비활성화, 마지막 active 해제, 같은 사용자·다른 방의 역할과 입주자 보존, 수동 상태·논리 삭제 및 반복 호출을 검사한다. 교체 뒤 점유 중인 방의 투어 신청 거절도 실제 투어 서비스로 확인한다. 파일·문서 생성·알림·Slack은 mock한다. 스케줄러 자동 실행은 검사 중 끄고 동일한 실제 전이 메서드를 명시적으로 호출한다. HTTP/JWT 권한 회수 검증은 별도 후속 작업이다.
+`ContractLifecycleIntegrationTest`는 실제 MySQL·Flyway와 계약 서비스를 사용해 스케줄러 교체, 관리자 비활성화, 마지막 active 해제, 같은 사용자·다른 방의 역할과 입주자 보존, 수동 상태·논리 삭제 및 반복 호출을 검사한다. 교체 뒤 점유 중인 방의 투어 신청 거절도 실제 투어 서비스로 확인한다. 파일·문서 생성·알림·Slack은 mock한다. 스케줄러 자동 실행은 검사 중 끄고 동일한 실제 전이 메서드를 명시적으로 호출한다. 계약 종료가 커밋된 뒤 다음 HTTP 요청에서 기존 JWT의 tenant 권한을 회수하는 검증은 [IBM-06](jwt-current-authority.md)의 `JwtAuthorityIntegrationTest`에서 연결한다.
 
 [CI 검사기](ci.md)는 이 suite가 누락·0개·skip이면 실패한다. 로컬 검사, 원격 Actions, 운영 배포·데이터 복구의 결과는 각각 실행 증거로 확인한다.
