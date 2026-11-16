@@ -1,5 +1,5 @@
 // features/reservation/pages/TourReservationCreate.jsx
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { propertyApi } from '../../property/api/propertyApi';
@@ -14,9 +14,10 @@ import { toKoreanMessage } from '../../../app/http/errorMapper';
 import { formatBuildingDisplay } from '../../../shared/utils/branchLabel';
 import {
   validatePhone,
-  validateTourName,
   validateTourPwd,
 } from '../../../shared/utils/validators';
+
+const EMPTY_ITEMS = [];
 
 export default function TourReservationCreate({
   inlineMode = false,
@@ -32,9 +33,10 @@ export default function TourReservationCreate({
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const initRoomId =
+  const initRoomId = String(
     propRoomId ||
-    (searchParams.get('roomId') ? String(searchParams.get('roomId')) : '');
+    searchParams.get('roomId') || ''
+  );
   const initBuildingId =
     initialBuildingId ??
     (searchParams.get('buildingId')
@@ -51,32 +53,47 @@ export default function TourReservationCreate({
   const [bLoading, setBLoading] = useState(false);
   const [bError, setBError] = useState('');
   const [selectedBuilding, setSelectedBuilding] = useState(null);
+  const buildingId = selectedBuilding ? Number(selectedBuilding.buildingId) : null;
 
   // rooms
   const [roomsPage, setRoomsPage] = useState(null);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState('');
-  const rooms = roomsPage?.content ?? [];
+  const rooms = roomsPage?.buildingId === buildingId
+    ? roomsPage.page?.content ?? EMPTY_ITEMS : EMPTY_ITEMS;
 
   // slot
   const [date, setDate] = useState(
     initDate ?? new Date().toISOString().slice(0, 10)
   );
   const [roomId, setRoomId] = useState(initRoomId);
-  const [slots, setSlots] = useState([]);
+  const [slotsResult, setSlotsResult] = useState(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState('');
-  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [slotSelection, setSlotSelection] = useState(null);
+  const selectedRoomInfo = rooms.find((r) => String(r.roomId) === String(roomId));
+  const verifiedRoomId = selectedRoomInfo ? Number(selectedRoomInfo.roomId) : null;
+  const slotQueryKey = buildingId && verifiedRoomId && date
+    ? JSON.stringify([buildingId, verifiedRoomId, date]) : null;
+  const slots = slotsResult?.key === slotQueryKey
+    ? slotsResult.slots : EMPTY_ITEMS;
+  const selectedSlot = slotSelection?.key === slotQueryKey
+    && slots.includes(slotSelection.slot) ? slotSelection.slot : null;
+  const setSelectedSlot = useCallback((slot) => {
+    setSlotSelection(slot ? { key: slotQueryKey, slot } : null);
+  }, [slotQueryKey]);
 
   const [form, setForm] = useState({ tourNm: '', tourTel: '', tourPwd: '' });
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const submitRef = useRef(false);
 
   // AI 추천 슬롯 자동 선택 (slots 로드 후 한 번만 적용)
   const aiSlotAppliedRef = React.useRef(false);
 
   // 빌딩 목록 로드
-  const loadBuildings = async () => {
+  const loadBuildings = useCallback(async () => {
     setBLoading(true);
     setBError('');
     try {
@@ -93,129 +110,122 @@ export default function TourReservationCreate({
     } finally {
       setBLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadBuildings();
-  }, []);
+  }, [loadBuildings]);
 
   // 빌딩 목록 로드 후 URL buildingId로 자동 선택
   useEffect(() => {
     if (!initBuildingId || !buildings.length) return;
     const found = buildings.find(
-      (b) => Number(b.buildingId) === initBuildingId
+      (b) => Number(b.buildingId) === Number(initBuildingId)
     );
     if (found && !selectedBuilding) setSelectedBuilding(found);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildings, initBuildingId]);
+  }, [buildings, initBuildingId, selectedBuilding]);
 
   // 빌딩 선택 → 방 목록 로드
-  const loadRooms = async (buildingId) => {
-    if (!buildingId) return;
-    setRoomsLoading(true);
+  useEffect(() => {
+    let current = true;
+    setRoomsPage(null);
     setRoomsError('');
-    try {
-      const page = await reservationApi.reservableRooms({
-        buildingId,
-        page: 1,
-        size: 200,
-        sort: 'roomNo',
-        direct: 'ASC',
-      });
-      setRoomsPage(page);
-    } catch (e) {
-      setRoomsError(e?.message || '방 조회 실패');
-      setRoomsPage(null);
-    } finally {
-      setRoomsLoading(false);
-    }
-  };
-
-  const loadSlots = async ({ buildingId, roomId, date }) => {
-    setSlotsLoading(true);
-    setSlotsError('');
-    try {
-      const res = await reservationApi.reservableTourSlots({
-        buildingId,
-        roomId,
-        date,
-      });
-      setSlots(res?.availableSlots ?? []);
-    } catch (e) {
-      setSlotsError(e?.message || '슬롯 조회 실패');
-      setSlots([]);
-    } finally {
-      setSlotsLoading(false);
-    }
-  };
-
-  // 빌딩 선택 → 방 목록 로드
-  useEffect(() => {
-    if (!selectedBuilding?.buildingId) return;
-    setSelectedSlot(null);
-    setSlots([]);
-    loadRooms(Number(selectedBuilding.buildingId));
-    // URL에서 온 roomId는 유지, 다른 건물 수동 선택 시 초기화
-    if (
-      initBuildingId &&
-      Number(selectedBuilding.buildingId) !== initBuildingId
-    ) {
+    setRoomsLoading(Boolean(buildingId));
+    if (!buildingId) {
       setRoomId('');
+      return () => { current = false; };
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBuilding]);
+    const loadRooms = async () => {
+      try {
+        const page = await reservationApi.reservableRooms({
+          buildingId, page: 1, size: 200, sort: 'roomNo', direct: 'ASC',
+        });
+        if (!current) return;
+        const availableRooms = page?.content ?? [];
+        setRoomsPage({ buildingId, page });
+        setRoomId((previous) => {
+          if (availableRooms.some((r) => String(r.roomId) === String(previous)))
+            return previous;
+          if (availableRooms.some((r) => String(r.roomId) === initRoomId))
+            return initRoomId;
+          return availableRooms.length ? String(availableRooms[0].roomId) : '';
+        });
+      } catch (e) {
+        if (!current) return;
+        setRoomsError(e?.message || '방 조회 실패');
+        setRoomsPage(null);
+        setRoomId('');
+      } finally {
+        if (current) setRoomsLoading(false);
+      }
+    };
+    loadRooms();
+    return () => { current = false; };
+  }, [buildingId, initRoomId]);
 
-  // rooms 로드 후 URL roomId 자동 선택 (없으면 첫 번째)
+  // Hide results whose request no longer belongs to the selected building, room and date.
   useEffect(() => {
-    if (!rooms.length) return;
-    if (initRoomId && rooms.find((r) => String(r.roomId) === initRoomId)) {
-      setRoomId(initRoomId);
-    } else if (!roomId) {
-      setRoomId(String(rooms[0].roomId));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rooms]);
-
-  // roomId/date/building 변경 → slots 조회
-  useEffect(() => {
-    if (!selectedBuilding?.buildingId || !roomId || !date) return;
-    setSelectedSlot(null);
+    let current = true;
+    setSlotSelection(null);
+    setConfirmOpen(false);
     setSubmitError('');
-    aiSlotAppliedRef.current = false; // 날짜/방 변경 시 AI 자동선택 재시도 허용
-    loadSlots({
-      buildingId: Number(selectedBuilding.buildingId),
-      roomId: Number(roomId),
-      date,
-    });
-  }, [selectedBuilding, roomId, date]);
+    setSlotsResult(null);
+    setSlotsError('');
+    setSlotsLoading(Boolean(slotQueryKey));
+    if (!slotQueryKey) return () => { current = false; };
+    const loadSlots = async () => {
+      try {
+        const res = await reservationApi.reservableTourSlots({
+          buildingId, roomId: verifiedRoomId, date,
+        });
+        if (!current) return;
+        const availableSlots = (res?.availableSlots ?? []).filter((slot) =>
+          slot.startAt?.slice(0, 10) === date && slot.endAt?.slice(0, 10) === date);
+        setSlotsResult({ key: slotQueryKey, slots: availableSlots });
+      } catch (e) {
+        if (!current) return;
+        setSlotsError(e?.message || '슬롯 조회 실패');
+        setSlotsResult(null);
+      } finally {
+        if (current) setSlotsLoading(false);
+      }
+    };
+    loadSlots();
+    return () => { current = false; };
+  }, [buildingId, verifiedRoomId, date, slotQueryKey]);
 
-  // AI 추천 시간 자동 선택: slots 로드 후 startAt 매칭
+  // Apply the initial recommendation only to its original booking context.
   useEffect(() => {
-    if (!initSlotStartAt || aiSlotAppliedRef.current) return;
-    if (!slots.length) return;
+    if (!initSlotStartAt || aiSlotAppliedRef.current || slotsLoading) return;
+    if (!slots.length || !slotQueryKey) return;
+    if (initBuildingId && Number(initBuildingId) !== buildingId) return;
+    if (initRoomId && initRoomId !== String(verifiedRoomId)) return;
+    if (initSlotStartAt.slice(0, 10) !== date) return;
 
     const targetStart = initSlotStartAt.replace('T', ' ').slice(0, 16);
-    const match = slots.find((s) => {
-      const sStart = (s.startAt || '').replace('T', ' ').slice(0, 16);
-      return sStart === targetStart;
-    });
+    const targetEnd = initSlotEndAt?.replace('T', ' ').slice(0, 16);
+    const match = slots.find((slot) =>
+      (slot.startAt || '').replace('T', ' ').slice(0, 16) === targetStart
+      && (!targetEnd || (slot.endAt || '').replace('T', ' ').slice(0, 16) === targetEnd));
     if (match) {
       setSelectedSlot(match);
       aiSlotAppliedRef.current = true;
     }
-  }, [slots, initSlotStartAt]);
+  }, [slots, slotsLoading, slotQueryKey, initSlotStartAt, initSlotEndAt,
+    initBuildingId, initRoomId, buildingId, verifiedRoomId, date, setSelectedSlot]);
 
   const canSubmit = useMemo(() => {
-    if (!selectedBuilding?.buildingId) return false;
-    if (!roomId) return false;
-    if (!selectedSlot) return false;
+    if (!buildingId || !verifiedRoomId) return false;
+    if (roomsLoading || slotsLoading || submitLoading) return false;
+    if (!slotQueryKey || !selectedSlot) return false;
     if (!form.tourNm || !form.tourTel || !form.tourPwd) return false;
     if (form.tourNm.trim().length < 2) return false;
     if (!/^01[016789]\d{7,8}$/.test(form.tourTel.replace(/-/g, '')))
       return false;
     if (!/^[0-9]{4}$/.test(form.tourPwd)) return false;
     return true;
-  }, [selectedBuilding, roomId, selectedSlot, form]);
+  }, [buildingId, verifiedRoomId, roomsLoading, slotsLoading, submitLoading,
+    slotQueryKey, selectedSlot, form]);
 
   const getFormError = () => {
     if (!form.tourNm || form.tourNm.trim().length < 2)
@@ -227,17 +237,14 @@ export default function TourReservationCreate({
     return '';
   };
 
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const submitRef = useRef(false);
-
   const doCreateTourReservation = async () => {
-    if (submitRef.current) return;
+    if (submitRef.current || !canSubmit) return;
     submitRef.current = true;
     setSubmitLoading(true);
     try {
       await reservationApi.createTourReservation({
-        buildingId: Number(selectedBuilding.buildingId),
-        roomId: Number(roomId),
+        buildingId,
+        roomId: verifiedRoomId,
         tourStartAt: selectedSlot.startAt,
         tourEndAt: selectedSlot.endAt,
         tourNm: form.tourNm,
@@ -267,10 +274,6 @@ export default function TourReservationCreate({
     }
     setConfirmOpen(true);
   };
-
-  const selectedRoomInfo = rooms.find(
-    (r) => String(r.roomId) === String(roomId)
-  );
 
   // ── 인라인 모드: 팝업 안에서 폼만 렌더 ───────────────────────
   if (inlineMode) {
