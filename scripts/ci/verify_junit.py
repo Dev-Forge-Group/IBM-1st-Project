@@ -13,6 +13,7 @@ REQUIRED_SUITES = (
     "org.myweb.uniplace.domain.commoncode.application.CommonCodeLookupIntegrationTest",
     "org.myweb.uniplace.domain.user.application.NotificationRecipientsIntegrationTest",
     "org.myweb.uniplace.domain.contract.application.ReviewContractHistoryIntegrationTest",
+    "org.myweb.uniplace.domain.contract.application.ContractLifecycleIntegrationTest",
     "org.myweb.uniplace.domain.reservation.application.SpaceReservationConcurrencyIntegrationTest",
     "org.myweb.uniplace.domain.reservation.application.ReservationAvailabilityIntegrationTest",
     "org.myweb.uniplace.domain.reservation.api.admin.AdminTourRestorationIntegrationTest",

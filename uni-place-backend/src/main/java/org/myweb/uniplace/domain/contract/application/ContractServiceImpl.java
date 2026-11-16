@@ -374,10 +374,15 @@ public class ContractServiceImpl implements ContractService {
 
         if (c.getRoom() != null) {
             Room room = c.getRoom();
-            room.setRoomSt(RoomStatus.available);
-            roomRepository.save(room);
-            log.info("[Room] set available contractId={} roomId={} status={}",
-                c.getContractId(), room.getRoomId(), newStatus);
+            // The JPA query includes this transaction's activation/deactivation changes.
+            // Release only contract-owned occupancy; preserve other active contracts and manual room states.
+            if (!room.isDeleted() && room.getRoomSt() == RoomStatus.contracted
+                    && !contractRepository.existsByRoom_RoomIdAndContractSt(room.getRoomId(), ContractStatus.active)) {
+                room.setRoomSt(RoomStatus.available);
+                roomRepository.save(room);
+                log.info("[Room] set available contractId={} roomId={} status={}",
+                    c.getContractId(), room.getRoomId(), newStatus);
+            }
         }
 
         if (c.getUser() != null && c.getUser().getUserRole() == UserRole.tenant) {
