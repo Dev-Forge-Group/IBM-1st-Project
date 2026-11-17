@@ -4,6 +4,8 @@ import java.time.LocalDate;
 
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
@@ -25,6 +27,8 @@ public class ContractCreateRequest {
     private LocalDate contractEnd;
 
     @NotNull(message = "paymentDay는 필수입니다.")
+    @Min(value = 1, message = "paymentDay는 1~31 사이의 숫자여야 합니다.")
+    @Max(value = 31, message = "paymentDay는 1~31 사이의 숫자여야 합니다.")
     private Integer paymentDay;
 
     // ✅ 회원 입력(임대인 영역)

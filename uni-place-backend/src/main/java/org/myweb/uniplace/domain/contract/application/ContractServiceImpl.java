@@ -71,6 +71,7 @@ public class ContractServiceImpl implements ContractService {
     @Override
     public ContractResponse createContract(ContractCreateRequest request) {
         String userId = currentUserId();
+        validateCreateInputs(request);
         validateContractPeriod(request.getContractStart(), request.getContractEnd());
 
         User user = userRepository.findById(userId)
@@ -402,6 +403,18 @@ public class ContractServiceImpl implements ContractService {
         if (userId != null) {
             safeNotify(userId, NotificationType.CONTRACT_CFM.name(),
                 "계약이 승인되었습니다. 시작일에 자동으로 활성화됩니다. 계약 번호: " + c.getContractId());
+        }
+    }
+
+    private void validateCreateInputs(ContractCreateRequest request) {
+        if (request == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST);
+        }
+        Integer paymentDay = request.getPaymentDay();
+        var signFile = request.getSignFile();
+        if (paymentDay == null || paymentDay < 1 || paymentDay > 31
+                || signFile == null || signFile.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST);
         }
     }
 

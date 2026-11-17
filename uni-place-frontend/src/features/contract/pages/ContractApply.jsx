@@ -38,6 +38,7 @@ const addDays = (base, days) => {
   return toDateStr(d);
 };
 const MIN_CONTRACT_DAYS = 7;
+const EMPTY_SIGNATURE_MESSAGE = '빈 서명 파일은 첨부할 수 없습니다. 다른 이미지를 선택해주세요.';
 
 const sunLabel = { s: '남향', n: '북향', e: '동향', w: '서향' };
 
@@ -179,6 +180,12 @@ export default function ContractApply() {
   const handleSignFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size === 0) {
+      setSubmitError(EMPTY_SIGNATURE_MESSAGE);
+      e.target.value = '';
+      return;
+    }
+    setSubmitError(null);
     setSignFile(file);
     const reader = new FileReader();
     reader.onload = (ev) => setSignPreview(ev.target.result);
@@ -248,8 +255,8 @@ export default function ContractApply() {
     }
 
     // 서명 파일
-    if (!signFile) {
-      setSubmitError('서명 이미지를 첨부해주세요.');
+    if (!signFile || signFile.size === 0) {
+      setSubmitError(signFile ? EMPTY_SIGNATURE_MESSAGE : '서명 이미지를 첨부해주세요.');
       return;
     }
 
