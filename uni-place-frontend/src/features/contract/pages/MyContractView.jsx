@@ -1,14 +1,13 @@
 // features/contract/pages/MyContractView.jsx
 // 마이페이지 > 마이룸 탭
 // 내 계약서 목록 → 각 계약서마다 방 상세 정보 + 사진 표시 + 계약서 이미지 보기
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { contractApi } from '../api/contractApi';
 import { propertyApi } from '../../property/api/propertyApi';
 import { authApi } from '../../user/api/authApi';
-import { getOrCreateDeviceId } from '../../../app/http/tokenStore';
-import { withApiPrefix } from '../../../app/http/apiBase';
-import { toApiImageUrl } from '../../file/api/fileApi';
+import { getOrCreateDeviceId, tokenStore } from '../../../app/http/tokenStore';
+import { fileApi, savePrivateFileBlob, toApiImageUrl } from '../../file/api/fileApi';
 import styles from './MyContractView.module.css';
 
 /* ─── 이미지 갤러리 ───────────────────────────────────────────── */
@@ -185,13 +184,102 @@ function RoomInfoPanel({ room, contract }) {
 }
 
 /* ─── 계약서 이미지 뷰어 모달 ────────────────────────────────── */
+function releaseContractPreview(request) {
+  if (!request?.previewUrl) return;
+  URL.revokeObjectURL(request.previewUrl);
+  request.previewUrl = null;
+}
+
 function ContractImageModal({ contract, onClose, noOverlay = false }) {
-  const imgUrl =
-    toApiImageUrl(contract.contractPdfUrl) ||
-    withApiPrefix(`/files/${contract.contractPdfFileId}/view`);
-  const downloadUrl =
-    toApiImageUrl(contract.contractPdfUrl) ||
-    withApiPrefix(`/files/${contract.contractPdfFileId}/download`);
+  const fileId = contract.contractPdfFileId;
+  const requestRef = useRef(null);
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    const request = {
+      active: true,
+      previewController: new AbortController(),
+      previewCancelled: false,
+      previewUrl: null,
+      downloadController: null,
+      releaseDownload: null,
+      downloading: false,
+    };
+    requestRef.current = request;
+    setPreview(null);
+    setError('');
+    setLoading(true);
+    setDownloading(false);
+
+    fileApi.getPrivateFileBlob(fileId, { signal: request.previewController.signal })
+      .then(({ blob }) => {
+        if (!request.active || request.previewCancelled || requestRef.current !== request) return;
+        request.previewUrl = URL.createObjectURL(blob);
+        setPreview({ fileId, url: request.previewUrl });
+      })
+      .catch(() => {
+        if (!request.active || request.previewCancelled || requestRef.current !== request) return;
+        setError('계약서를 불러오지 못했습니다. 다시 시도해주세요.');
+      })
+      .finally(() => {
+        if (request.active && requestRef.current === request) setLoading(false);
+      });
+
+    return () => {
+      request.active = false;
+      request.previewController.abort();
+      request.downloadController?.abort();
+      releaseContractPreview(request);
+      request.releaseDownload?.();
+      if (requestRef.current === request) requestRef.current = null;
+    };
+  }, [fileId, retry]);
+
+  const clearPreview = (request) => {
+    request.previewCancelled = true;
+    request.previewController.abort();
+    releaseContractPreview(request);
+    setPreview(null);
+    setLoading(false);
+  };
+
+  const handleDownload = async () => {
+    const request = requestRef.current;
+    if (!request?.active || request.downloading) return;
+    request.downloading = true;
+    request.downloadController = new AbortController();
+    setDownloading(true);
+    setError('');
+    try {
+      const { blob, filename } = await fileApi.getPrivateFileBlob(fileId, {
+        download: true,
+        signal: request.downloadController.signal,
+      });
+      if (!request.active || requestRef.current !== request) return;
+      request.releaseDownload?.();
+      request.releaseDownload = savePrivateFileBlob(blob, filename);
+    } catch {
+      if (!request.active || requestRef.current !== request) return;
+      clearPreview(request);
+      setError('계약서를 저장하지 못했습니다. 다시 시도해주세요.');
+    } finally {
+      if (request.active && requestRef.current === request) {
+        request.downloading = false;
+        setDownloading(false);
+      }
+    }
+  };
+
+  const handleImageError = (failedUrl) => {
+    const request = requestRef.current;
+    if (!request?.active || request.previewUrl !== failedUrl) return;
+    clearPreview(request);
+    setError('계약서 이미지를 불러올 수 없습니다.');
+  };
 
   return (
     <div className={noOverlay ? styles.imgOverlayInline : styles.imgOverlay} onClick={noOverlay ? undefined : onClose}>
@@ -202,14 +290,14 @@ function ContractImageModal({ contract, onClose, noOverlay = false }) {
             📄 계약서 · {contract.buildingNm} {contract.roomNo}호
           </span>
           <div className={styles.imgModalActions}>
-            <a
+            <button
+              type="button"
               className={styles.imgDownloadBtn}
-              href={downloadUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={handleDownload}
+              disabled={loading || downloading}
             >
-              ⬇ 저장
-            </a>
+              {downloading ? '저장 중…' : '⬇ 저장'}
+            </button>
             <button
               type="button"
               className={styles.imgCloseBtn}
@@ -222,19 +310,24 @@ function ContractImageModal({ contract, onClose, noOverlay = false }) {
 
         {/* 계약서 이미지 */}
         <div className={styles.imgScrollArea}>
-          <img
-            src={imgUrl}
-            alt="계약서"
-            className={styles.contractImg}
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-              e.currentTarget.nextSibling.style.display = 'flex';
-            }}
-          />
-          <div className={styles.imgLoadError} style={{ display: 'none' }}>
-            <span>⚠️</span>
-            <p>계약서 이미지를 불러올 수 없습니다.</p>
-          </div>
+          {loading && <p role="status">계약서를 불러오는 중…</p>}
+          {preview?.fileId === fileId && (
+            <img
+              src={preview.url}
+              alt="계약서"
+              className={styles.contractImg}
+              onError={() => handleImageError(preview.url)}
+            />
+          )}
+          {error && (
+            <div className={styles.imgLoadError} role="alert">
+              <span>⚠️</span>
+              <p>{error}</p>
+              <button type="button" onClick={() => setRetry((value) => value + 1)}>
+                다시 시도
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -257,11 +350,14 @@ function PasswordModal({ onConfirm, onClose, noOverlay = false }) {
     try {
       const me = await authApi.me();
       const deviceId = getOrCreateDeviceId();
-      await authApi.login({
+      const tokens = await authApi.login({
         userEmail: me.userEmail,
         userPwd: pwdInput,
         deviceId,
       });
+      if (tokens?.accessToken) tokenStore.setAccess(tokens.accessToken);
+      if (tokens?.refreshToken) tokenStore.setRefresh(tokens.refreshToken);
+      if (tokens?.deviceId) tokenStore.setDeviceId(tokens.deviceId);
       onConfirm();
     } catch {
       setPwdError('비밀번호가 올바르지 않습니다.');

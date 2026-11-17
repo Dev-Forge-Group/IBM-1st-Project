@@ -1,9 +1,9 @@
 // features/admin/pages/contract/AdminContractList.jsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { adminApi } from '../../api/adminApi';
-import { withApiPrefix } from '../../../../app/http/apiBase';
+import { fileApi, savePrivateFileBlob } from '../../../file/api/fileApi';
 import styles from '../reservation/AdminReservation.module.css';
 
 const CONTRACT_STATUS_OPTIONS = [
@@ -54,6 +54,67 @@ function fmtMoney(v) {
 function toDatetimeLocal(value) {
   if (!value) return '';
   return String(value).slice(0, 16);
+}
+
+function ContractDownloadButton({ fileId }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const requestRef = useRef(null);
+  const releaseRef = useRef(null);
+
+  useEffect(() => {
+    setBusy(false);
+    setError('');
+    return () => {
+      requestRef.current?.abort();
+      requestRef.current = null;
+      releaseRef.current?.();
+      releaseRef.current = null;
+    };
+  }, [fileId]);
+
+  const download = async () => {
+    if (requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    releaseRef.current?.();
+    releaseRef.current = null;
+    setBusy(true);
+    setError('');
+    try {
+      const { blob, filename } = await fileApi.getPrivateFileBlob(fileId, {
+        download: true,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || requestRef.current !== controller) return;
+      releaseRef.current = savePrivateFileBlob(blob, filename);
+    } catch {
+      if (!controller.signal.aborted && requestRef.current === controller) {
+        setError('계약서 다운로드에 실패했습니다. 다시 시도해 주세요.');
+      }
+    } finally {
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setBusy(false);
+      }
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className={styles.actionBtn}
+        style={{ textDecoration: 'underline' }}
+        onClick={download}
+        disabled={busy}
+        aria-busy={busy}
+      >
+        {busy ? '다운로드 중...' : '다운로드'}
+      </button>
+      {error && <span role="alert" style={{ display: 'block' }}>{error}</span>}
+    </>
+  );
 }
 
 export default function AdminContractList() {
@@ -407,15 +468,8 @@ export default function AdminContractList() {
                   </td>
 
                   <td>
-                    {c.contractPdfUrl ? (
-                      <a
-                        href={withApiPrefix(c.contractPdfUrl)}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ textDecoration: 'underline' }}
-                      >
-                        다운로드
-                      </a>
+                    {c.contractPdfFileId ? (
+                      <ContractDownloadButton fileId={c.contractPdfFileId} />
                     ) : (
                       '-'
                     )}
@@ -540,15 +594,8 @@ export default function AdminContractList() {
                       <div className={styles.detailRow}>
                         <span className={styles.detailLabel}>계약서</span>
                         <span className={styles.detailValue}>
-                          {detail.contractPdfUrl ? (
-                            <a
-                              href={withApiPrefix(detail.contractPdfUrl)}
-                              target="_blank"
-                              rel="noreferrer"
-                              style={{ textDecoration: 'underline' }}
-                            >
-                              다운로드
-                            </a>
+                          {detail.contractPdfFileId ? (
+                            <ContractDownloadButton fileId={detail.contractPdfFileId} />
                           ) : (
                             '-'
                           )}

@@ -3,6 +3,7 @@ package org.myweb.uniplace.domain.file.api.dto.response;
 import java.time.LocalDateTime;
 
 import org.myweb.uniplace.domain.file.domain.entity.UploadFile;
+import org.myweb.uniplace.domain.file.domain.enums.FileRefType;
 import org.myweb.uniplace.global.storage.StorageService;
 
 import lombok.*;
@@ -30,11 +31,15 @@ public class FileResponse {
     private String adminDownloadUrl;
 
     /**
-     * StorageService 를 받아서 환경에 맞는 URL 생성
+     * 계약 파일은 인증 proxy를 사용하고 공개 파일은 환경에 맞는 URL을 생성한다.
      * - 로컬: /files/{id}/view
      * - S3:   https://bucket.s3.region.amazonaws.com/ROOM/10/.../file.jpg
      */
     public static FileResponse fromEntity(UploadFile e, StorageService storage) {
+        if (e.getFileParentType() != null
+                && FileRefType.CONTRACT.dbValue().equalsIgnoreCase(e.getFileParentType().trim())) {
+            return fromEntity(e);
+        }
         Integer id = e.getFileId();
         String relativeDir  = e.getFilePath();
         String renameFilename = e.getRenameFilename();

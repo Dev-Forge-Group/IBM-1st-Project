@@ -43,13 +43,7 @@ public class AdminContractSummaryResponse {
         Building b = (r != null ? r.getBuilding() : null);
 
         Integer pdfId = c.getContractPdfFileId();
-        String pdfUrl = null;
-        if (pdfId != null) {
-            pdfUrl = (storage != null)
-                    ? storage.resolveDownloadUrl(pdfId, "", "")
-                    : "/files/" + pdfId + "/download";
-            if (pdfUrl.isBlank()) pdfUrl = "/files/" + pdfId + "/download";
-        }
+        String pdfUrl = pdfId != null ? "/files/" + pdfId + "/download" : null;
 
         return AdminContractSummaryResponse.builder()
                 .contractId(c.getContractId())

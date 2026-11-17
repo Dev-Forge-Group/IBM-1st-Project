@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | commoncode | `boolean exists(String canonicalCode)` | support의 `QnaServiceImpl`, `ComplainServiceImpl` |
 | contract | `boolean hasActiveOrEndedContract(String userId, Integer roomId)` | review의 `ReviewServiceImpl.createReview` |
+| file 소유 포트·contract 구현 | `boolean isOwner(Integer contractId, String userId)` | file의 CONTRACT 접근 정책; 계약 Repository는 contract adapter 내부에서만 사용 |
 
 호출자는 기존 trim·대문자화·별칭·`ALL`·기본값 규칙을 그대로 적용한다. 공통코드 context는 정확한 코드가 DB에 존재하는지만 반환한다. 비활성 코드나 비활성 그룹도 존재하면 true이며, DB 오류를 false로 바꾸지 않는다. 관리자용 목록 DTO나 Entity를 계약에 포함하지 않는다.
 

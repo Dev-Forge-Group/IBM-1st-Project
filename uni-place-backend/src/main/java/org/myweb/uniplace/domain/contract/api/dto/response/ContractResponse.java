@@ -6,7 +6,6 @@ import java.time.LocalDateTime;
 
 import org.myweb.uniplace.domain.contract.domain.entity.Contract;
 import org.myweb.uniplace.domain.contract.domain.enums.ContractStatus;
-import org.myweb.uniplace.domain.file.api.dto.response.FileResponse;
 import org.myweb.uniplace.domain.property.domain.entity.Building;
 import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.global.storage.StorageService;
@@ -40,24 +39,14 @@ public class ContractResponse {
     private String contractPdfUrl;
 
     /**
-     * StorageService 를 받아서 환경에 맞는 PDF URL 생성
+     * StorageService 인자를 받는 기존 호출도 인증된 파일 proxy URL을 사용한다.
      */
     public static ContractResponse fromEntity(Contract c, StorageService storage) {
         Room r = c.getRoom();
         Building b = (r != null ? r.getBuilding() : null);
 
         Integer pdfId = c.getContractPdfFileId();
-        String pdfUrl = null;
-        if (pdfId != null && storage != null) {
-            // PDF 파일 메타가 없으므로 fileId 기반 로컬 URL 또는 스토리지에서 직접 처리
-            // 로컬: /files/{id}/download  /  S3: S3 URL (FileResponse 통해 처리 권장)
-            pdfUrl = storage.resolveDownloadUrl(pdfId, "", "");
-            // 로컬이면 /files/{pdfId}/download 반환, S3이면 baseUrl 기반 URL 반환
-            // S3의 경우 실제 경로가 없으므로 아래처럼 fileId 기반 URL 사용
-            if (pdfUrl.isBlank()) pdfUrl = "/files/" + pdfId + "/download";
-        } else if (pdfId != null) {
-            pdfUrl = "/files/" + pdfId + "/download";
-        }
+        String pdfUrl = pdfId != null ? "/files/" + pdfId + "/download" : null;
 
         return ContractResponse.builder()
                 .contractId(c.getContractId())
@@ -82,7 +71,7 @@ public class ContractResponse {
                 .build();
     }
 
-    /** 하위 호환 (StorageService 없이 호출 시 로컬 URL 사용) */
+    /** 하위 호환 (StorageService 없이 호출 시에도 인증 proxy 사용) */
     public static ContractResponse fromEntity(Contract c) {
         return fromEntity(c, null);
     }

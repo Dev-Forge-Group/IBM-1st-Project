@@ -32,6 +32,7 @@ python3 ../scripts/ci/verify_junit.py build/test-results/test
 - `JwtAuthorityIntegrationTest`: 실제 MySQL·JWT·보안 필터·HTTP에서 관리자 역할 변경과 계약 종료 뒤 기존 access token의 현재 DB 권한, principal/authority 일치, guest·회원 상태·token 오류와 refresh 계약.
 - `TourHttpJourneyIntegrationTest`: RANDOM_PORT 실제 HTTP·MySQL에서 공개 탐색·생성·조회·취소와 역할별 관리자 처리, 복구 충돌·이력·슬롯 변화·잘못된 query400 계약. 기본 CI의 브라우저 실행은 포함하지 않으며 로컬 opt-in 브라우저 검증은 별도 증거로 남긴다.
 - `TourLookupPaginationIntegrationTest`: 실제 HTTP·MySQL에서 상태 필터를 페이지 전에 적용한 content/count·정렬, 전화/PIN 경계와 alias·PIN 비노출, 유효한 빈 필터·페이지 범위·기존 오류 및 취소 후 페이지 감소.
+- `ContractFileAccessIntegrationTest`: 실제 JWT·HTTP·MySQL에서 CONTRACT 파일의 소유자/admin read/write·삭제 파일·static 우회 차단·API URL·private cache와 공개 ROOM 유지. Storage/정적 bytes는 합성 fixture만 사용한다.
 - `SpaceReservationConcurrencyIntegrationTest`: 실제 MySQL의 활성 슬롯 유일성, 동시 생성과 상태 변경, 취소·종료 후 재예약.
 - `ReservationAvailabilityIntegrationTest`: 투어·공용공간의 예약 가능 목록과 엄격 겹침 정책, 비정형 과거 이력, 같은 날짜의 투어 입력.
 - `AdminTourRestorationIntegrationTest`: 실제 JWT·관리자 보안 필터·HTTP·MySQL에서 투어 복구 충돌, 정상 전이·거절 및 상태 보존.

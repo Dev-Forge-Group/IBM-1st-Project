@@ -17,6 +17,7 @@ REQUIRED_SUITES = (
     "org.myweb.uniplace.global.security.JwtAuthorityIntegrationTest",
     "org.myweb.uniplace.domain.reservation.api.TourHttpJourneyIntegrationTest",
     "org.myweb.uniplace.domain.reservation.api.TourLookupPaginationIntegrationTest",
+    "org.myweb.uniplace.domain.file.api.ContractFileAccessIntegrationTest",
     "org.myweb.uniplace.domain.reservation.application.SpaceReservationConcurrencyIntegrationTest",
     "org.myweb.uniplace.domain.reservation.application.ReservationAvailabilityIntegrationTest",
     "org.myweb.uniplace.domain.reservation.api.admin.AdminTourRestorationIntegrationTest",

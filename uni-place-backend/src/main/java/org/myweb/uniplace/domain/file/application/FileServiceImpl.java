@@ -33,6 +33,7 @@ public class FileServiceImpl implements FileService {
 
     private final UploadFileRepository uploadFileRepository;
     private final StorageService storageService;   // 로컬 or S3 자동 주입
+    private final ContractFileAccessPolicy contractFileAccessPolicy;
 
     private static final List<String> ALLOWED_EXT = List.of(
             ".png", ".jpg", ".jpeg", ".gif", ".webp",
@@ -55,6 +56,7 @@ public class FileServiceImpl implements FileService {
         if (parentId == null) {
             throw new IllegalArgumentException("fileParentId는 필수입니다.");
         }
+        contractFileAccessPolicy.requireAccess(parentType, parentId);
 
         if (request.getFiles() == null || request.getFiles().isEmpty()) {
             return FileUploadResponse.builder()
@@ -92,6 +94,7 @@ public class FileServiceImpl implements FileService {
     @Transactional(readOnly = true)
     public List<FileResponse> getActiveFiles(String parentType, Integer parentId) {
         String normalized = normalizeParentType(parentType);
+        contractFileAccessPolicy.requireAccess(normalized, parentId);
         List<UploadFile> files =
                 uploadFileRepository.findByFileParentTypeAndFileParentIdAndDeleteYnOrderBySortOrderAscFileIdAsc(
                         normalized, parentId, NOT_DELETED);
@@ -103,6 +106,7 @@ public class FileServiceImpl implements FileService {
     public Map<Integer, List<FileResponse>> getActiveFilesMap(String parentType, List<Integer> parentIds) {
         if (parentIds == null || parentIds.isEmpty()) return Map.of();
         String normalized = normalizeParentType(parentType);
+        parentIds.forEach(parentId -> contractFileAccessPolicy.requireAccess(normalized, parentId));
         List<UploadFile> all = uploadFileRepository.findActiveByParentTypeAndParentIds(normalized, parentIds);
         return all.stream()
                 .collect(Collectors.groupingBy(
@@ -116,12 +120,14 @@ public class FileServiceImpl implements FileService {
     public FileResponse getFile(Integer fileId) {
         UploadFile file = uploadFileRepository.findByFileIdAndDeleteYn(fileId, NOT_DELETED)
                 .orElseThrow(() -> new BusinessException(ErrorCode.FILE_NOT_FOUND));
+        contractFileAccessPolicy.requireAccess(file.getFileParentType(), file.getFileParentId());
         return FileResponse.fromEntity(file, storageService);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<FileResponse> getAllFilesForAdmin(String parentType, Integer parentId) {
+        contractFileAccessPolicy.requireAdministrator();
         String normalized = normalizeParentType(parentType);
         List<UploadFile> files =
                 uploadFileRepository.findByFileParentTypeAndFileParentIdOrderBySortOrderAscFileIdAsc(normalized, parentId);
@@ -131,6 +137,7 @@ public class FileServiceImpl implements FileService {
     @Override
     @Transactional(readOnly = true)
     public FileResponse getFileForAdmin(Integer fileId) {
+        contractFileAccessPolicy.requireAdministrator();
         UploadFile file = uploadFileRepository.findById(fileId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.FILE_NOT_FOUND));
         return FileResponse.fromEntity(file, storageService);
@@ -139,11 +146,15 @@ public class FileServiceImpl implements FileService {
     @Override
     public void softDeleteFiles(List<Integer> fileIds) {
         if (fileIds == null || fileIds.isEmpty()) return;
+        // Validate every actual private target before the bulk update changes any row.
+        uploadFileRepository.findAllById(fileIds).forEach(file ->
+                contractFileAccessPolicy.requireAccess(file.getFileParentType(), file.getFileParentId()));
         uploadFileRepository.softDeleteByIds(fileIds);
     }
 
     @Override
     public void softDeleteFilesByParent(String parentType, Integer parentId, List<Integer> fileIds) {
+        contractFileAccessPolicy.requireAccess(parentType, parentId);
         if (fileIds == null || fileIds.isEmpty()) return;
         String normalized = normalizeParentType(parentType);
         uploadFileRepository.softDeleteByIdsAndParent(fileIds, normalized, parentId);
@@ -152,6 +163,7 @@ public class FileServiceImpl implements FileService {
     @Override
     @Transactional
     public void updateFileOrder(String parentType, Integer parentId, List<Integer> orderedFileIds) {
+        contractFileAccessPolicy.requireAccess(parentType, parentId);
         if (orderedFileIds == null || orderedFileIds.isEmpty()) return;
         String normalized = normalizeParentType(parentType);
         for (int i = 0; i < orderedFileIds.size(); i++) {
