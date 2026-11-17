@@ -15,6 +15,7 @@ import org.myweb.uniplace.domain.reservation.api.dto.request.LookupTourReservati
 import org.myweb.uniplace.domain.reservation.api.dto.response.TourReservableResponse;
 import org.myweb.uniplace.domain.reservation.api.dto.response.TourReservationResponse;
 import org.myweb.uniplace.domain.reservation.application.TourReservationService;
+import org.myweb.uniplace.domain.reservation.domain.enums.TourStatus;
 
 import org.myweb.uniplace.global.response.ApiResponse;
 import org.myweb.uniplace.global.response.PageResponse;
@@ -83,6 +84,7 @@ public class TourReservationController {
     @PostMapping("/lookup")
     public ApiResponse<PageResponse<TourReservationResponse>> lookup(
             @Validated @RequestBody LookupTourReservationRequest request,
+            @RequestParam(name = "status", required = false) TourStatus status,
             @RequestParam(name = "page", defaultValue = "1") int page,
             @RequestParam(name = "size", defaultValue = "10") int size,
             @RequestParam(name = "sort", defaultValue = "tourId") String sort,
@@ -96,7 +98,7 @@ public class TourReservationController {
 
         Pageable pageable = PageRequest.of(page - 1, size, direction, sort);
 
-        return ApiResponse.ok(PageResponse.of(tourReservationService.lookup(request, pageable)));
+        return ApiResponse.ok(PageResponse.of(tourReservationService.lookup(request, status, pageable)));
     }
 
     @PutMapping("/cancel/{tourId}")

@@ -1,6 +1,6 @@
 // features/reservation/pages/TourReservationList.jsx
 // 팝업 내부 + 독립 페이지 겸용
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useTourReservations from '../hooks/useTourReservations';
 import Header from '../../../app/layouts/components/Header';
@@ -20,7 +20,7 @@ function StatusBadge({ status }) {
   return <span className={`${styles.statusBadge} ${s.cls}`}>{s.label}</span>;
 }
 
-function TourCard({ item, onCancel }) {
+function TourCard({ item, onCancel, cancelDisabled, pendingCancelId }) {
   const id = item.tourId ?? item.id;
   const startAt = item.tourStartAt ?? item.startAt ?? '-';
   const endAt = item.tourEndAt ?? item.endAt ?? '-';
@@ -55,9 +55,10 @@ function TourCard({ item, onCancel }) {
           <button
             className={styles.cancelBtn}
             type="button"
+            disabled={cancelDisabled}
             onClick={() => onCancel(id)}
           >
-            예약 취소
+            {pendingCancelId === id ? '취소 중…' : '예약 취소'}
           </button>
         )}
       </div>
@@ -76,40 +77,92 @@ export default function TourReservationList({
   onClose,
 }) {
   const nav = useNavigate();
-  const { lookup, lookupPage, lookupLoading, lookupError, cancel } =
+  const { lookup, invalidateLookup, lookupPage, lookupLoading, lookupError, cancel } =
     useTourReservations();
 
   const [tourTel, setTourTel] = useState('');
   const [tourPwd, setTourPwd] = useState('');
 
   const [statusFilter, setStatusFilter] = useState('all');
-  const allItems = lookupPage?.content ?? [];
-  const items = statusFilter === 'all'
-    ? allItems
-    : allItems.filter((it) => (it.tourSt ?? it.status) === statusFilter);
+  const [hasLookup, setHasLookup] = useState(false);
+  const [pendingCancelId, setPendingCancelId] = useState(null);
+  const lookupContext = useRef(null);
+  const cancelInFlight = useRef(false);
+  const mounted = useRef(true);
+  const isCancelling = pendingCancelId !== null;
+  const items = lookupPage?.content ?? [];
 
-  const onLookup = async (page = 1) => {
-    if (!tourTel.trim()) return alert('연락처를 입력해주세요.');
-    if (!/^[0-9]{4}$/.test(tourPwd))
-      return alert('비밀번호는 숫자 4자리입니다.');
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; lookupContext.current = null; };
+  }, []);
+
+  const changeCredential = (field, value) => {
+    if (cancelInFlight.current) return;
+    if (field === 'phone') setTourTel(value);
+    else setTourPwd(value);
+    lookupContext.current = null;
+    setHasLookup(false);
+    setStatusFilter('all');
+    invalidateLookup();
+  };
+
+  const loadLookup = async ({ credentials, status, page }, canClamp = true) => {
+    const context = { credentials: { ...credentials }, status, page };
+    lookupContext.current = context;
+    setHasLookup(true);
+    setStatusFilter(status);
     try {
-      await lookup(
-        { tourTel: tourTel.trim(), tourPwd },
-        { page, size: 10, sort: 'tourId', direct: 'DESC' }
-      );
+      const result = await lookup(context.credentials, {
+        page, size: 10, sort: 'tourId', direct: 'DESC',
+        status: status === 'all' ? undefined : status,
+      });
+      if (!result || !mounted.current || lookupContext.current !== context) return;
+      const lastPage = Math.max(1, result.totalPages ?? 1);
+      if (canClamp && result.page > lastPage) {
+        await loadLookup({ credentials: context.credentials, status, page: lastPage }, false);
+      }
     } catch {
-      /* lookupError via hook */
+      // The hook publishes only the current request's error.
     }
   };
 
+  const onLookup = async (page = 1) => {
+    if (cancelInFlight.current || lookupLoading) return;
+    if (!tourTel.trim()) return alert('연락처를 입력해주세요.');
+    if (!/^[0-9]{4}$/.test(tourPwd))
+      return alert('비밀번호는 숫자 4자리입니다.');
+    await loadLookup({ credentials: { tourTel: tourTel.trim(), tourPwd }, status: statusFilter, page });
+  };
+
+  const onFilter = (status) => {
+    if (cancelInFlight.current || !lookupContext.current) return;
+    loadLookup({ credentials: lookupContext.current.credentials, status, page: 1 });
+  };
+
+  const onPage = (page) => {
+    if (cancelInFlight.current || lookupLoading || !lookupContext.current) return;
+    loadLookup({ ...lookupContext.current, page });
+  };
+
   const onCancel = async (tourId) => {
-    if (!window.confirm('예약을 취소하시겠습니까?')) return;
+    const context = lookupContext.current;
+    if (cancelInFlight.current || lookupLoading || !context
+        || !items.some((item) => (item.tourId ?? item.id) === tourId)) return;
+    cancelInFlight.current = true;
+    setPendingCancelId(tourId);
     try {
-      await cancel(tourId, { tourTel: tourTel.trim(), tourPwd });
+      if (!window.confirm('예약을 취소하시겠습니까?')) return;
+      await cancel(tourId, context.credentials);
+      if (!mounted.current || lookupContext.current !== context) return;
       alert('취소 완료');
-      onLookup(lookupPage?.page ?? 1);
+      await loadLookup({ ...context, page: lookupPage?.page ?? context.page });
     } catch (e) {
-      alert(toKoreanMessage(e, '취소 처리 중 오류가 발생했습니다.'));
+      if (mounted.current && lookupContext.current === context)
+        alert(toKoreanMessage(e, '취소 처리 중 오류가 발생했습니다.'));
+    } finally {
+      cancelInFlight.current = false;
+      if (mounted.current) setPendingCancelId(null);
     }
   };
 
@@ -144,7 +197,8 @@ export default function TourReservationList({
             type="tel"
             placeholder="연락처 (예: 010-0000-0000)"
             value={tourTel}
-            onChange={(e) => setTourTel(e.target.value)}
+            disabled={isCancelling}
+            onChange={(e) => changeCredential('phone', e.target.value)}
             onKeyDown={handleKeyDown}
           />
           <input
@@ -154,7 +208,8 @@ export default function TourReservationList({
             value={tourPwd}
             maxLength={4}
             pattern="\d{4}"
-            onChange={(e) => setTourPwd(e.target.value)}
+            disabled={isCancelling}
+            onChange={(e) => changeCredential('pin', e.target.value)}
             onKeyDown={handleKeyDown}
             style={{ maxWidth: 160 }}
           />
@@ -162,7 +217,7 @@ export default function TourReservationList({
             className={styles.lookupBtn}
             type="button"
             onClick={() => onLookup(1)}
-            disabled={lookupLoading}
+            disabled={lookupLoading || isCancelling}
           >
             {lookupLoading ? '조회 중…' : '🔍 조회'}
           </button>
@@ -171,8 +226,7 @@ export default function TourReservationList({
       </div>
 
       {/* 결과 */}
-      {lookupPage && (
-        <>
+      {hasLookup && (
           <div className={styles.filterRow}>
             {[
               { value: 'all', label: '전체' },
@@ -185,26 +239,27 @@ export default function TourReservationList({
                 key={f.value}
                 type="button"
                 className={`${styles.filterChip} ${statusFilter === f.value ? styles.filterChipActive : ''}`}
-                onClick={() => setStatusFilter(f.value)}
+                disabled={isCancelling}
+                aria-pressed={statusFilter === f.value}
+                onClick={() => onFilter(f.value)}
               >
                 {f.label}
               </button>
             ))}
           </div>
+      )}
+      {lookupPage && (
+        <>
           <div className={styles.resultHeader}>
             <span className={styles.resultCount}>
-              {statusFilter === 'all'
-                ? <>총 <strong>{lookupPage.totalElements ?? allItems.length}</strong>건</>
-                : <>총 <strong>{items.length}</strong>건</>}
+              총 <strong>{lookupPage.totalElements ?? 0}</strong>건
             </span>
             <div className={styles.paging}>
               <button
                 className={styles.pageBtn}
                 type="button"
-                disabled={(lookupPage.page ?? 1) <= 1}
-                onClick={() =>
-                  onLookup(Math.max(1, (lookupPage.page ?? 1) - 1))
-                }
+                disabled={lookupLoading || isCancelling || (lookupPage.page ?? 1) <= 1}
+                onClick={() => onPage(Math.max(1, (lookupPage.page ?? 1) - 1))}
               >
                 이전
               </button>
@@ -214,8 +269,8 @@ export default function TourReservationList({
               <button
                 className={styles.pageBtn}
                 type="button"
-                disabled={items.length < 10}
-                onClick={() => onLookup((lookupPage.page ?? 1) + 1)}
+                disabled={lookupLoading || isCancelling || (lookupPage.page ?? 1) >= (lookupPage.totalPages ?? 0)}
+                onClick={() => onPage((lookupPage.page ?? 1) + 1)}
               >
                 다음
               </button>
@@ -233,6 +288,8 @@ export default function TourReservationList({
                   key={it.tourId ?? it.id}
                   item={it}
                   onCancel={onCancel}
+                  cancelDisabled={lookupLoading || isCancelling}
+                  pendingCancelId={pendingCancelId}
                 />
               ))}
             </div>

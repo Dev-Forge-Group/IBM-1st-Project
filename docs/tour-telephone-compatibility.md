@@ -13,7 +13,7 @@
 
 ## 기존 소비 계약
 
-기존 Repository 메서드 이름을 default wrapper로 유지해 서비스와 AI의 직접 호출을 함께 처리한다. JPQL을 유지하므로 `tourId`, `tourStartAt` 등의 entity 속성 정렬, 페이지 count, 상태 enum 바인딩도 그대로다. lookup은 취소·완료 이력을 계속 포함하며, AI는 결과가 없으면 기존처럼 빈 `items`를 전달한다. HTTP lookup의 빈 결과 오류와 AI의 빈 목록 계약을 합치지 않는다.
+기존 Repository 메서드 이름을 default wrapper로 유지해 서비스와 AI의 직접 호출을 함께 처리한다. JPQL을 유지하므로 `tourId`, `tourStartAt` 등의 entity 속성 정렬, 페이지 count, 상태 enum 바인딩도 그대로다. status 없는 lookup은 취소·완료 이력을 계속 포함하며, AI는 결과가 없으면 기존처럼 빈 `items`를 전달한다. 기존 HTTP lookup의 빈 결과 오류와 AI의 빈 목록 계약을 합치지 않는다. [IBM-08의 선택적 status query](tour-lookup-pagination.md)는 같은 credential 비교로 상태를 페이지 전에 필터링하며, 유효 credential의 빈 상태 결과를 200 빈 페이지로 반환하는 별도 opt-in 계약이다.
 
 생성과 inactive→active 관리자 복구의 전화 중복은 같은 시작·종료 시각의 active 이력에 적용한다. 다른 방도 포함하며 기존409_2를 사용한다. 방의 엄격 overlap, inactive 재사용, ended 취소 거절은 바뀌지 않는다.
 

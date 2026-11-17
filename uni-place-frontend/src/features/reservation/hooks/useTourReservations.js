@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { reservationApi } from '../api/reservationApi';
 
 export default function useTourReservations() {
@@ -65,21 +65,35 @@ export default function useTourReservations() {
   const [lookupPage, setLookupPage] = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState('');
+  const lookupSequence = useRef(0);
+
+  useEffect(() => () => { lookupSequence.current += 1; }, []);
+
+  const invalidateLookup = useCallback(() => {
+    lookupSequence.current += 1;
+    setLookupPage(null);
+    setLookupError('');
+    setLookupLoading(false);
+  }, []);
 
   const lookup = useCallback(async (body, pageOpt) => {
+    const sequence = ++lookupSequence.current;
     setLookupLoading(true);
     setLookupError('');
+    setLookupPage(null);
     try {
       // ✅ 네 API: reservationApi.lookupTourReservations
       const page = await reservationApi.lookupTourReservations(body, pageOpt);
+      if (sequence !== lookupSequence.current) return null;
       setLookupPage(page);
       return page;
     } catch (e) {
+      if (sequence !== lookupSequence.current) return null;
       setLookupError(e?.message ?? '조회 실패');
       setLookupPage(null);
       throw e;
     } finally {
-      setLookupLoading(false);
+      if (sequence === lookupSequence.current) setLookupLoading(false);
     }
   }, []);
 
@@ -109,6 +123,7 @@ export default function useTourReservations() {
     create,
 
     lookup,
+    invalidateLookup,
     lookupPage,
     lookupLoading,
     lookupError,

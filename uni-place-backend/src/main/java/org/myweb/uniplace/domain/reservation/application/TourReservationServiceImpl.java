@@ -166,6 +166,23 @@ public class TourReservationServiceImpl implements TourReservationService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public Page<TourReservationResponse> lookup(LookupTourReservationRequest request, TourStatus status, Pageable pageable) {
+        if (status == null) {
+            // Omitted status retains the legacy empty-page rejection and all-history query.
+            return lookup(request, pageable);
+        }
+        Page<TourReservationEntity> page = tourReservationRepository.findByTourTelAndTourPwdAndTourSt(
+                request.getTourTel(), request.getTourPwd(), status, pageable);
+        if (page.getTotalElements() == 0 && !tourReservationRepository.existsByTourTelAndTourPwd(
+                request.getTourTel(), request.getTourPwd())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST);
+        }
+        // A valid credential may have no rows in this status, or request a page beyond its last row.
+        return page.map(TourReservationResponse::fromEntity);
+    }
+
+    @Override
     public TourReservationResponse cancel(Integer tourId, CancelTourReservationRequest request) {
 
         lockWrites();

@@ -20,6 +20,8 @@ public interface TourReservationService {
 
     Page<TourReservationResponse> lookup(LookupTourReservationRequest request, Pageable pageable);
 
+    Page<TourReservationResponse> lookup(LookupTourReservationRequest request, TourStatus status, Pageable pageable);
+
     TourReservationResponse cancel(Integer tourId, CancelTourReservationRequest request);
 
     void changeStatus(Integer tourId, TourStatus status);

@@ -118,9 +118,9 @@ export const reservationApi = {
 
   lookupTourReservations: (
     body,
-    { page = 1, size = 10, sort = 'tourId', direct = 'DESC' } = {}
+    { page = 1, size = 10, sort = 'tourId', direct = 'DESC', status } = {}
   ) => {
-    const q = buildQuery({ page, size, sort, direct });
+    const q = buildQuery({ page, size, sort, direct, status });
     return request(`/tour-reservations/lookup${q}`, { method: 'POST', body });
   },
 

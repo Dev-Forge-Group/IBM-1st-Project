@@ -112,6 +112,28 @@ public interface TourReservationRepository extends JpaRepository<TourReservation
             @Param("tourTel") String tourTel, @Param("tourPwd") String tourPwd,
             @Param("canonicalTel") String canonicalTel, Pageable pageable);
 
+    default Page<TourReservationEntity> findByTourTelAndTourPwdAndTourSt(
+            String tourTel, String tourPwd, TourStatus status, Pageable pageable) {
+        return findCompatibleTelephoneByStatus(tourTel, tourPwd,
+                TourTelephone.canonicalForCredentials(tourTel, tourPwd), status, pageable);
+    }
+
+    @Query(value = "select t from TourReservationEntity t where " + CREDENTIAL_MATCH + " and t.tourSt = :status",
+           countQuery = "select count(t) from TourReservationEntity t where " + CREDENTIAL_MATCH + " and t.tourSt = :status")
+    Page<TourReservationEntity> findCompatibleTelephoneByStatus(
+            @Param("tourTel") String tourTel, @Param("tourPwd") String tourPwd,
+            @Param("canonicalTel") String canonicalTel, @Param("status") TourStatus status,
+            Pageable pageable);
+
+    default boolean existsByTourTelAndTourPwd(String tourTel, String tourPwd) {
+        return existsCompatibleTelephone(tourTel, tourPwd, TourTelephone.canonicalForCredentials(tourTel, tourPwd));
+    }
+
+    @Query("select count(t) > 0 from TourReservationEntity t where " + CREDENTIAL_MATCH)
+    boolean existsCompatibleTelephone(
+            @Param("tourTel") String tourTel, @Param("tourPwd") String tourPwd,
+            @Param("canonicalTel") String canonicalTel);
+
     default TourReservationEntity findByTourIdAndTourTelAndTourPwd(Integer tourId, String tourTel, String tourPwd) {
         return findCompatibleTelephoneById(tourId, tourTel, tourPwd,
                 TourTelephone.canonicalForCredentials(tourTel, tourPwd));
