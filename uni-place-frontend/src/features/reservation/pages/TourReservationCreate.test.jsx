@@ -120,6 +120,57 @@ describe('tour creation keeps slots within the current building, room and date',
   afterEach(() => { cleanup(); });
 
   it.each([
+    ['inline conflict', true, 409, 'TOUR_RSV_409_1', '이미 예약된 시간대와 겹칩니다. 다른 시간을 선택해주세요.'],
+    ['standalone conflict', false, 409, 'TOUR_RSV_409_1', '이미 예약된 시간대와 겹칩니다. 다른 시간을 선택해주세요.'],
+    ['inline server failure', true, 500, 'COMMON_500', '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'],
+    ['standalone server failure', false, 500, 'COMMON_500', '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'],
+  ])('shows one error and preserves a deliberate current-context retry after %s', async (
+    _name, inlineMode, status, errorCode, message
+  ) => {
+    reservations.reservableTourSlots.mockImplementation(({ date }) => Promise.resolve(
+      slotPage(date, date === FIRST_DATE ? 'Original 10:00' : 'Retry 13:00', date === FIRST_DATE ? 10 : 13)
+    ));
+    reservations.createTourReservation.mockRejectedValueOnce(Object.assign(
+      new Error('Synthetic failed reservation'), { status, errorCode }
+    ));
+    const view = renderBooking({ inlineMode });
+    fireEvent.click(await screen.findByRole('button', { name: 'Original 10:00' }));
+    fillVisitor();
+
+    await confirmBooking();
+
+    await waitFor(() => expect(screen.getAllByText(`⚠️ ${message}`)).toHaveLength(1));
+    expect(screen.queryByText('예약을 신청하시겠습니까?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Reservation lookup destination')).not.toBeInTheDocument();
+    expect(view.onSuccess).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText('방문자 이름')).toHaveValue('Fixture visitor');
+    expect(screen.getByPlaceholderText('010-0000-0000').value === TELEPHONE).toBe(true);
+    expect(screen.getByPlaceholderText('조회·취소 시 사용').value === PIN).toBe(true);
+    expect(bookingButton()).toBeEnabled();
+    expect(reservations.createTourReservation.mock.calls.length).toBe(1);
+
+    changeDate(view, NEXT_DATE);
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry 13:00' }));
+    expect(screen.queryByText(`⚠️ ${message}`)).not.toBeInTheDocument();
+    expect(reservations.createTourReservation.mock.calls.length).toBe(1);
+    await confirmBooking();
+
+    await waitFor(() => expect(reservations.createTourReservation.mock.calls.length).toBe(2));
+    const retried = reservations.createTourReservation.mock.calls[1][0];
+    expect(retried.buildingId).toBe(1);
+    expect(retried.roomId).toBe(11);
+    expect(retried.tourStartAt).toBe(`${NEXT_DATE}T13:00:00`);
+    expect(retried.tourEndAt).toBe(`${NEXT_DATE}T14:00:00`);
+    expect(retried.tourTel === TELEPHONE).toBe(true);
+    expect(retried.tourPwd === PIN).toBe(true);
+    if (inlineMode) {
+      await waitFor(() => expect(view.onSuccess).toHaveBeenCalledTimes(1));
+    } else {
+      await screen.findByText('Reservation lookup destination');
+    }
+  });
+
+  it.each([
     ['inline', true], ['standalone', false],
   ])('cannot submit a previous date while replacement slots load in %s mode', async (_name, inlineMode) => {
     const next = deferred();

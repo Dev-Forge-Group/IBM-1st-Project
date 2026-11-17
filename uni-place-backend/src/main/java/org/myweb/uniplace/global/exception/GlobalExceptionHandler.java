@@ -11,8 +11,10 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -91,6 +93,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity
             .status(ErrorCode.BAD_REQUEST.getStatus())
             .body(ApiResponse.error(ErrorCode.BAD_REQUEST, message));
+    }
+
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class})
+    public ResponseEntity<ApiResponse<Void>> handleRequestParameter(Exception e) {
+        return ResponseEntity
+            .status(ErrorCode.BAD_REQUEST.getStatus())
+            .body(ApiResponse.error(ErrorCode.BAD_REQUEST,
+                "요청 파라미터의 형식 또는 필수 값이 올바르지 않습니다."));
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

@@ -458,11 +458,7 @@ export default function TourReservationCreate({
         )}
 
         {submitError && (
-          <div className={styles.submitError}>⚠️ {submitError}</div>
-        )}
-
-        {submitError && (
-          <div className={styles.submitError}>⚠️ {submitError}</div>
+          <div className={styles.submitError} role="alert">⚠️ {submitError}</div>
         )}
 
         <div className={styles.btnRow}>
@@ -766,6 +762,10 @@ export default function TourReservationCreate({
               </span>
             </div>
           </div>
+        )}
+
+        {submitError && (
+          <div className={styles.submitError} role="alert">⚠️ {submitError}</div>
         )}
 
         <div className={styles.btnRow}>
