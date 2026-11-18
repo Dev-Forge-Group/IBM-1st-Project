@@ -50,6 +50,8 @@ python3 -B -m unittest discover -s scripts/ci -p 'test_*.py' -v
 
 프런트는 `uni-place-frontend`에서 `npm ci`, `npm run lint`, `npm test`, `npm run build`로 같은 동작을 확인한다. CI에서는 추가 JUnit reporter를 사용해 runner 임시 디렉터리에 결과를 기록한다. 별도 Playwright 브라우저 helper와 외부 AI·결제·OAuth·운영 환경은 이 workflow의 검사 범위가 아니다.
 
+계약 날짜의 `ContractApply.dates.test.jsx`·`contractDates.test.js`는 실제 worker 시간대·offset을 확인한 뒤 한국 자정·LA의 DST·윤년·월/연말 계산과 제출 payload를 검사한다. fake Date와 시간대 설정은 검사 뒤 복원한다. 제어된 브라우저 시계와 실제 API를 연결하는 opt-in 검증은 이 기본 CI와 별도 증거다. [날짜 계약](contract-calendar-dates.md).
+
 workflow를 원격에 반영하면 PR에 검사가 생성된다. 병합 필수 검사로 강제하려면 저장소 ruleset/branch protection에서 `Frontend checks`, `Backend checks`를 required status check로 지정해야 한다. 이 파일은 그 설정을 변경하지 않는다.
 
 기존 배포 workflow는 독립적으로 실행된다. 이 검사를 추가한 것만으로 배포 workflow가 결과를 기다리지는 않는다. 배포 연계는 별도로 검토한다.

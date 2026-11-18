@@ -7,6 +7,7 @@ import Modal from '../../../shared/components/Modal/Modal';
 import { propertyApi } from '../../property/api/propertyApi';
 import { contractApi } from '../api/contractApi';
 import { useAuth } from '../../user/hooks/useAuth';
+import { addContractDays, contractEndAfterMonths, todayInSeoul } from '../utils/contractDates';
 import styles from './ContractApply.module.css';
 import {
   validatePhone,
@@ -19,24 +20,6 @@ import {
 const formatKRW = (v) =>
   v != null ? Number(v).toLocaleString('ko-KR') + '원' : '-';
 
-const toDateStr = (d) => d.toISOString().slice(0, 10);
-const todayStr = () => toDateStr(new Date());
-
-const addMonths = (base, m) => {
-  if (!base) return '';
-  const d = new Date(base);
-  if (isNaN(d.getTime())) return '';
-  d.setMonth(d.getMonth() + m);
-  d.setDate(d.getDate() - 1);
-  return toDateStr(d);
-};
-const addDays = (base, days) => {
-  if (!base) return '';
-  const d = new Date(base);
-  if (isNaN(d.getTime())) return '';
-  d.setDate(d.getDate() + days);
-  return toDateStr(d);
-};
 const MIN_CONTRACT_DAYS = 7;
 const EMPTY_SIGNATURE_MESSAGE = '빈 서명 파일은 첨부할 수 없습니다. 다른 이미지를 선택해주세요.';
 
@@ -63,7 +46,7 @@ export default function ContractApply() {
 
   /* 폼 */
   const [form, setForm] = useState({
-    contractStart: toDateStr(new Date()),
+    contractStart: todayInSeoul(),
     contractEnd: '',
     paymentDay: '',
     // 임대인 (입주자가 계약서 폼에 기입)
@@ -89,14 +72,14 @@ export default function ContractApply() {
   const [submitError, setSubmitError] = useState(null);
   const [submitOk, setSubmitOk] = useState(false);
   const minContractEnd = form.contractStart
-    ? addDays(form.contractStart, MIN_CONTRACT_DAYS)
+    ? addContractDays(form.contractStart, MIN_CONTRACT_DAYS)
     : '';
 
   /* 계약 종료일 자동계산 */
   useEffect(() => {
     if (!form.contractStart) return;
     const months = rentType === 'monthly_rent' ? room?.rentMin || 12 : 1;
-    setForm((f) => ({ ...f, contractEnd: addMonths(f.contractStart, months) }));
+    setForm((f) => ({ ...f, contractEnd: contractEndAfterMonths(f.contractStart, months) }));
     // eslint-disable-next-line
   }, [room, rentType, form.contractStart]);
 
@@ -168,9 +151,9 @@ export default function ContractApply() {
           next.contractEnd = '';
         } else if (
           next.contractEnd &&
-          next.contractEnd < addDays(value, MIN_CONTRACT_DAYS)
+          next.contractEnd < addContractDays(value, MIN_CONTRACT_DAYS)
         ) {
-          next.contractEnd = addDays(value, MIN_CONTRACT_DAYS);
+          next.contractEnd = addContractDays(value, MIN_CONTRACT_DAYS);
         }
       }
       return next;
@@ -201,7 +184,7 @@ export default function ContractApply() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     const pd = Number(form.paymentDay);
-    const today = todayStr();
+    const today = todayInSeoul();
 
     // 계약 시작일
     if (!form.contractStart || form.contractStart < today) {
@@ -530,6 +513,7 @@ export default function ContractApply() {
                 <strong>제2조 (존속기간)</strong> 임대차 기간은 인도일로부터
                 아래와 같이 한다.
               </p>
+              <p className={styles.articleText}>계약 날짜는 한국 시간(KST)을 기준으로 합니다.</p>
               <div className={styles.docTable}>
                 <div className={styles.docRowGrid2}>
                   <div className={styles.docCell}>
@@ -542,7 +526,7 @@ export default function ContractApply() {
                       value={form.contractStart}
                       onChange={handleChange}
                       className={`${styles.docInput} ${isDateBlocked(form.contractStart) ? styles.docInputBlocked : ''}`}
-                      min={todayStr()}
+                      min={todayInSeoul()}
                       required
                     />
                     {isDateBlocked(form.contractStart) && (
