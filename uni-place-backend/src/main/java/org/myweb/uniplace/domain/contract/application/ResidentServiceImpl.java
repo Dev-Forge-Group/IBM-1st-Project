@@ -32,6 +32,7 @@ public class ResidentServiceImpl implements ResidentService {
     }
     
     @Override
+    @Transactional
     public ResidentResponse createResident(ResidentCreateRequest request) {
 
         // 1) 계약 존재 + room/building fetch
