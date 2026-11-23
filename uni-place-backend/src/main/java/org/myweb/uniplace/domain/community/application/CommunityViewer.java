@@ -11,7 +11,7 @@ record CommunityViewer(String userId, boolean administrator) {
                 || !(authentication.getPrincipal() instanceof AuthUser user)) {
             return new CommunityViewer(null, false);
         }
-        return new CommunityViewer(user.getUserId(), "admin".equalsIgnoreCase(
-                user.getRole() == null ? "" : user.getRole().trim()));
+        // Account administrators have no business permission to identify anonymous authors.
+        return new CommunityViewer(user.getUserId(), false);
     }
 }

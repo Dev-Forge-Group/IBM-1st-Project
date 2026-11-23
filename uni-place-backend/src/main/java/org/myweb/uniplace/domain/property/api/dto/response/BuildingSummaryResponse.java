@@ -1,6 +1,8 @@
 // 경로: org/myweb/uniplace/domain/property/api/dto/response/BuildingSummaryResponse.java
 package org.myweb.uniplace.domain.property.api.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 
 import org.myweb.uniplace.domain.property.domain.entity.Building;
@@ -10,7 +12,7 @@ import lombok.*;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
+@Builder(toBuilder = true)
 public class BuildingSummaryResponse {
 
     private Integer buildingId;
@@ -27,6 +29,20 @@ public class BuildingSummaryResponse {
     // ✅ 썸네일
     private Integer thumbFileId;
     private String thumbUrl;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String ownershipStatus;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean publicVisible;
+
+    public BuildingSummaryResponse withPublicVisibility(boolean visible) {
+        return toBuilder().publicVisible(visible).build();
+    }
+
+    public BuildingSummaryResponse withOwnershipStatus(String status) {
+        return toBuilder().ownershipStatus(status).build();
+    }
 
     public static BuildingSummaryResponse fromEntity(Building b, Integer thumbFileId, String thumbUrl) {
         return BuildingSummaryResponse.builder()

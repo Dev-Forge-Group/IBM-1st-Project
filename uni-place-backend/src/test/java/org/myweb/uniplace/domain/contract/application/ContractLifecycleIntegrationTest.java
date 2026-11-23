@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.contract.application;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -19,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.myweb.uniplace.domain.contract.api.dto.request.ContractUpdateRequest;
+import org.myweb.uniplace.domain.ownership.application.OwnershipAccessService;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.contract.api.dto.response.ContractResponse;
 import org.myweb.uniplace.domain.contract.domain.entity.Contract;
 import org.myweb.uniplace.domain.contract.domain.entity.Resident;
@@ -64,7 +68,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "contract.status-transition-cron=-"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({ContractServiceImpl.class, TourReservationServiceImpl.class,
+@Import({OwnershipAccessService.class, ContractServiceImpl.class, TourReservationServiceImpl.class,
         ReservationValidator.class, TourReservationConflictPolicyImpl.class})
 @Testcontainers
 class ContractLifecycleIntegrationTest {
@@ -91,6 +95,7 @@ class ContractLifecycleIntegrationTest {
     @Autowired RoomRepository rooms;
     @Autowired UserRepository users;
     @Autowired JdbcTemplate jdbc;
+    @Autowired OwnershipAccess ownership;
     @MockitoBean FileService files;
     @MockitoBean ContractImageService images;
     @MockitoBean NotificationService notifications;
@@ -106,6 +111,7 @@ class ContractLifecycleIntegrationTest {
         today = LocalDate.now(KST);
         building = buildings.saveAndFlush(Building.builder().buildingNm("IBM05 lifecycle fixture")
                 .buildingAddr("Test fixture address").build());
+        rentalOperator(jdbc, "lifecycle-owner-" + building.getBuildingId(), building.getBuildingId());
         clearInvocations(files, images, notifications, slack);
     }
 
@@ -126,8 +132,10 @@ class ContractLifecycleIntegrationTest {
         assertThat(state(next)).isEqualTo("active");
         assertThat(residentCount(old)).isZero();
         assertThat(residentCount(next)).isEqualTo(1);
-        assertThat(role(departing)).isEqualTo("user");
-        assertThat(role(arriving)).isEqualTo("tenant");
+        assertThat(role(departing)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(departing.getUserId()).roles()).doesNotContain("TENANT");
+        assertThat(role(arriving)).isEqualTo("user");
+        assertThat(ownership.effectiveAccess(arriving.getUserId()).roles()).contains("TENANT");
         assertThat(contractCount(room)).isEqualTo(2);
         assertThatThrownBy(() -> tours.create(CreateTourReservationRequest.builder()
                 .buildingId(building.getBuildingId()).roomId(room.getRoomId())
@@ -162,6 +170,7 @@ class ContractLifecycleIntegrationTest {
         assertThat(residentCount(old)).isZero();
         assertThat(residentCount(next)).isEqualTo(1);
         assertThat(role(tenant)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(tenant.getUserId()).roles()).contains("TENANT");
         verifyNoInteractions(files, images, notifications, slack);
     }
 
@@ -185,8 +194,10 @@ class ContractLifecycleIntegrationTest {
         assertThat(state(other)).isEqualTo("active");
         assertThat(residentCount(old)).isZero();
         assertThat(residentCount(other)).isEqualTo(1);
-        assertThat(role(departing)).isEqualTo("user");
+        assertThat(role(departing)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(departing.getUserId()).roles()).doesNotContain("TENANT");
         assertThat(role(remaining)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(remaining.getUserId()).roles()).contains("TENANT");
         assertThat(contractCount(room)).isEqualTo(2);
         verifyCancellationNotice(departing);
     }
@@ -204,7 +215,8 @@ class ContractLifecycleIntegrationTest {
         assertThat(roomState(room)).isEqualTo("available");
         assertThat(state(old)).isEqualTo("ended");
         assertThat(residentCount(old)).isZero();
-        assertThat(role(tenant)).isEqualTo("user");
+        assertThat(role(tenant)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(tenant.getUserId()).roles()).doesNotContain("TENANT");
         assertThat(contractCount(room)).isEqualTo(1);
         verifyCancellationNotice(tenant);
 
@@ -212,7 +224,8 @@ class ContractLifecycleIntegrationTest {
         contracts.flush();
         assertThat(roomState(room)).isEqualTo("available");
         assertThat(residentCount(old)).isZero();
-        assertThat(role(tenant)).isEqualTo("user");
+        assertThat(role(tenant)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(tenant.getUserId()).roles()).doesNotContain("TENANT");
         verifyCancellationNotice(tenant);
     }
 
@@ -232,6 +245,7 @@ class ContractLifecycleIntegrationTest {
         assertThat(roomState(released)).isEqualTo("available");
         assertThat(roomState(occupied)).isEqualTo("contracted");
         assertThat(role(tenant)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(tenant.getUserId()).roles()).contains("TENANT");
         assertThat(residentCount(old)).isZero();
         assertThat(residentCount(other)).isEqualTo(1);
         assertThat(state(other)).isEqualTo("active");
@@ -258,7 +272,8 @@ class ContractLifecycleIntegrationTest {
         assertThat(state(future)).isEqualTo("approved");
         assertThat(state(ended)).isEqualTo("ended");
         assertThat(state(cancelled)).isEqualTo("cancelled");
-        assertThat(role(tenant)).isEqualTo("user");
+        assertThat(role(tenant)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(tenant.getUserId()).roles()).doesNotContain("TENANT");
         assertThat(residentCount(old)).isZero();
         assertThat(contractCount(room)).isEqualTo(4);
         verifyCancellationNotice(tenant);
@@ -278,7 +293,8 @@ class ContractLifecycleIntegrationTest {
         assertThat(roomState(room)).isEqualTo(preserved.name());
         assertThat(state(old)).isEqualTo("ended");
         assertThat(residentCount(old)).isZero();
-        assertThat(role(tenant)).isEqualTo("user");
+        assertThat(role(tenant)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(tenant.getUserId()).roles()).doesNotContain("TENANT");
         verifyCancellationNotice(tenant);
     }
 
@@ -299,7 +315,8 @@ class ContractLifecycleIntegrationTest {
                 .isEqualTo("Y");
         assertThat(state(old)).isEqualTo("ended");
         assertThat(residentCount(old)).isZero();
-        assertThat(role(tenant)).isEqualTo("user");
+        assertThat(role(tenant)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(tenant.getUserId()).roles()).doesNotContain("TENANT");
         verifyCancellationNotice(tenant);
     }
 
@@ -336,6 +353,7 @@ class ContractLifecycleIntegrationTest {
         assertThat(roomState(occupied)).isEqualTo("contracted");
         assertThat(residentCount(current)).isEqualTo(1);
         assertThat(role(tenant)).isEqualTo("tenant");
+        assertThat(ownership.effectiveAccess(tenant.getUserId()).roles()).contains("TENANT");
         assertThat(state(future)).isEqualTo("approved");
         assertThat(roomState(futureRoom)).isEqualTo("available");
         assertThat(residentCount(future)).isZero();

@@ -1,12 +1,13 @@
 import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useRef } from 'react';
-import { adminApi } from '../../api/adminApi';
+import { ownerApi as adminApi } from '../../../owner/api/ownerApi';
 import useBuildingOptions from '../../hooks/useBuildingOptions';
 import FileUploader from '../../../file/components/FileUploader';
 import useFileUpload from '../../../file/hooks/useFileUpload';
 import styles from './AdminCreateModal.module.css';
 
 const EMPTY = {
+  buildingId: '',
   buildingNm: '',
   roomNo: '',
   floor: '',
@@ -55,12 +56,13 @@ const ROOM_TYPES = [
 
 export default function AdminRoomModal({ roomId, onClose, onSuccess }) {
   const isEdit = !!roomId;
-  const { buildings, loading: bldgLoading } = useBuildingOptions();
+  const { buildings, loading: bldgLoading } = useBuildingOptions(adminApi);
   const [form, setForm] = useState(EMPTY);
   const [existingFiles, setExistingFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [fetchLoading, setFetchLoading] = useState(isEdit);
   const [error, setError] = useState('');
+  const [buildingManagementAllowed, setBuildingManagementAllowed] = useState(!isEdit);
   const fu = useFileUpload({ maxCount: 10 });
 
   // ✅ fu.initExistingOrder를 ref로 안정화 — 배포 환경에서
@@ -76,7 +78,9 @@ export default function AdminRoomModal({ roomId, onClose, onSuccess }) {
     adminApi
       .getRoomDetail(roomId)
       .then((data) => {
+        setBuildingManagementAllowed(data.buildingManagementAllowed === true);
         setForm({
+          buildingId: String(data.buildingId ?? ''),
           buildingNm: data.buildingNm || '',
           roomNo: data.roomNo ?? '',
           floor: data.floor ?? '',
@@ -101,8 +105,14 @@ export default function AdminRoomModal({ roomId, onClose, onSuccess }) {
       .finally(() => setFetchLoading(false));
   }, [isEdit, roomId]);
 
-  const handleChange = (e) =>
-    setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    if (name === 'buildingId') {
+      if (!buildingManagementAllowed) return;
+      const building = buildings.find((item) => String(item.buildingId) === value);
+      setForm((previous) => ({ ...previous, buildingId: value, buildingNm: building?.buildingNm || '' }));
+    } else setForm((previous) => ({ ...previous, [name]: value }));
+  };
 
   const handleSubmit = async () => {
     if (!form.buildingNm) {
@@ -130,6 +140,8 @@ export default function AdminRoomModal({ roomId, onClose, onSuccess }) {
     try {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => {
+        // A room owner may edit the room while its parent building belongs to someone else.
+        if (k === 'buildingNm' || (k === 'buildingId' && !buildingManagementAllowed)) return;
         if (v !== '') fd.append(k, v);
       });
       fu.newFiles.forEach((f) => fd.append('files', f));
@@ -201,20 +213,22 @@ export default function AdminRoomModal({ roomId, onClose, onSuccess }) {
                   </span>
                   <select
                     className={styles.select}
-                    name="buildingNm"
-                    value={form.buildingNm}
+                    name="buildingId"
+                    value={form.buildingId}
                     onChange={handleChange}
-                    disabled={bldgLoading}
+                    disabled={bldgLoading || !buildingManagementAllowed}
                   >
                     <option value="">
                       {bldgLoading ? '불러오는 중...' : '건물을 선택하세요'}
                     </option>
+                    {form.buildingId && !buildings.some((building) => String(building.buildingId) === form.buildingId) && <option value={form.buildingId}>[{form.buildingId}] {form.buildingNm}</option>}
                     {buildings.map((b) => (
-                      <option key={b.buildingId} value={b.buildingNm}>
+                      <option key={b.buildingId} value={String(b.buildingId)}>
                         [{b.buildingId}] {b.buildingNm} — {b.buildingAddr}
                       </option>
                     ))}
                   </select>
+                  {!buildingManagementAllowed && <span>현재 건물은 조회만 가능합니다. 호실 정보는 수정할 수 있습니다.</span>}
                 </label>
                 <label className={styles.field}>
                   <span className={styles.label}>
@@ -413,6 +427,7 @@ export default function AdminRoomModal({ roomId, onClose, onSuccess }) {
             <div className={styles.section}>
               <h3 className={styles.sectionTitle}>이미지</h3>
               <FileUploader
+                authenticatedExisting
                 existingFiles={existingFiles}
                 newFiles={fu.newFiles}
                 previews={fu.previews}

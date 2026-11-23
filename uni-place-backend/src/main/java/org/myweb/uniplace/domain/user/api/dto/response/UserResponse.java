@@ -7,9 +7,11 @@ import org.myweb.uniplace.domain.user.domain.enums.UserStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 
 @Getter
-@Builder
+@Builder(toBuilder = true)
 public class UserResponse {
     private String userId;
     private String userNm;
@@ -19,6 +21,9 @@ public class UserResponse {
     private String userTel;
 
     private String userRole;
+    private String accountKind;
+    private List<String> roles;
+    private String ownerStatus;
     private UserStatus userSt;
     private String deleteYN;
 
@@ -36,10 +41,25 @@ public class UserResponse {
                 .userBirth(u.getUserBirth())
                 .userTel(u.getUserTel())
                 .userRole(roleName)
+                .accountKind(u.getAccountKind() == null ? null : u.getAccountKind().name())
+                .roles(List.of())
+                .ownerStatus("NONE")
                 .userSt(u.getUserSt())
                 .deleteYN(u.getDeleteYN())
                 .createdAt(u.getCreatedAt())
                 .lastLoginAt(u.getLastLoginAt())
+                .build();
+    }
+
+    public static UserResponse from(User user, String accountKind, Collection<String> effectiveRoles,
+            String ownerStatus) {
+        List<String> roles = effectiveRoles == null ? List.of() : effectiveRoles.stream().sorted().toList();
+        String displayRole = roles.contains("ADMIN") ? "admin" : roles.contains("TENANT") ? "tenant" : "user";
+        return from(user).toBuilder()
+                .userRole(displayRole)
+                .accountKind(accountKind)
+                .roles(roles)
+                .ownerStatus(ownerStatus == null ? "NONE" : ownerStatus)
                 .build();
     }
 }

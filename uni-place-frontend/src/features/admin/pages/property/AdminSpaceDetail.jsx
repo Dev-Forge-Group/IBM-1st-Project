@@ -1,6 +1,6 @@
 import React from 'react';
 import { AdminEndpointDetailProbe } from '../../components/AdminEndpointProbe';
-import { adminApi } from '../../api/adminApi';
+import { ownerApi as adminApi } from '../../../owner/api/ownerApi';
 
 export default function AdminSpaceDetail() {
   return (

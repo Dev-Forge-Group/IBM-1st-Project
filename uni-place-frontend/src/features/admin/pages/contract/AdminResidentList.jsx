@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { adminApi } from '../../api/adminApi';
 import styles from '../reservation/AdminReservation.module.css';
 
-export default function AdminResidentList() {
+export default function AdminResidentList({ api = adminApi } = {}) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -34,7 +34,7 @@ export default function AdminResidentList() {
     setError('');
     try {
       // 네 adminApi 이름이 getResidents()라고 했으니 그대로 유지
-      const res = await adminApi.getResidents();
+      const res = await api.getResidents();
 
       // ✅ ApiResponse wrapper일 수도 있어서 방어적으로 처리
       const list = Array.isArray(res) ? res : (res?.data ?? res?.result ?? []);
@@ -44,7 +44,7 @@ export default function AdminResidentList() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     fetchList();

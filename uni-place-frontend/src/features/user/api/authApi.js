@@ -3,7 +3,7 @@ import { toKoreanMessage } from '../../../app/http/errorMapper';
 
 async function request(
   path,
-  { method = 'GET', body, headers = {}, auth = false } = {}
+  { method = 'GET', body, headers = {}, auth = false, cache } = {}
 ) {
   const res = await fetchWithAuthRetry(
     path,
@@ -14,6 +14,7 @@ async function request(
         ...headers,
       },
       credentials: 'same-origin',
+      ...(cache ? { cache } : {}),
       body: body ? JSON.stringify(body) : undefined,
     },
     { auth }
@@ -131,7 +132,7 @@ export const authApi = {
       auth: true,
     }),
 
-  me: () => request('/users/me', { auth: true }),
+  me: () => request('/users/me', { auth: true, cache: 'no-store' }),
 
   meSocialAccounts: () => request('/users/me/social-accounts', { auth: true }),
 

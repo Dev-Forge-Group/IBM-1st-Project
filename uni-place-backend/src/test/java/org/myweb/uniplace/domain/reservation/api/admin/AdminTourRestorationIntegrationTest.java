@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.reservation.api.admin;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -105,7 +107,8 @@ class AdminTourRestorationIntegrationTest {
             Room first = room(building, 1);
             Room second = room(building, 2);
             String prefix = "ibm01-" + building.getBuildingId();
-            user(prefix + "-admin", UserRole.admin);
+            user(prefix + "-admin", UserRole.user);
+            buildingOwner(jdbc, prefix + "-admin", building.getBuildingId());
             user(prefix + "-user", UserRole.user);
             return new Fixture(building.getBuildingId(), first.getRoomId(), second.getRoomId(),
                     prefix + "-admin", prefix + "-user");
@@ -191,7 +194,7 @@ class AdminTourRestorationIntegrationTest {
     }
 
     @Test
-    void theStatusQueryRemainsAdminOnlyAndReturnsTheExistingVoidEnvelope() throws Exception {
+    void theStatusQueryRequiresThePropertyOwnerAndReturnsTheExistingVoidEnvelope() throws Exception {
         Integer old = create(fixture.roomId(), phone(1), START);
         change(old, TourStatus.cancelled).andExpect(status().isOk());
 
@@ -206,11 +209,11 @@ class AdminTourRestorationIntegrationTest {
 
     private org.springframework.test.web.servlet.ResultActions change(Integer id, TourStatus status) throws Exception {
         return mvc.perform(statusRequest(id, status).header(HttpHeaders.AUTHORIZATION,
-                "Bearer " + jwt.createAccessToken(fixture.admin(), "admin")));
+                "Bearer " + jwt.createAccessToken(fixture.admin(), "owner")));
     }
 
     private static MockHttpServletRequestBuilder statusRequest(Integer id, TourStatus status) {
-        return put("/api/admin/tour-reservations/status/" + id).contextPath("/api").param("status", status.name());
+        return put("/api/owner/tour-reservations/status/" + id).contextPath("/api").param("status", status.name());
     }
 
     private Integer create(Integer roomId, String tel, LocalDateTime start) {

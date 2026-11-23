@@ -56,7 +56,7 @@ public class FileServiceImpl implements FileService {
         if (parentId == null) {
             throw new IllegalArgumentException("fileParentId는 필수입니다.");
         }
-        contractFileAccessPolicy.requireAccess(parentType, parentId);
+        contractFileAccessPolicy.requireWrite(parentType, parentId);
 
         if (request.getFiles() == null || request.getFiles().isEmpty()) {
             return FileUploadResponse.builder()
@@ -94,7 +94,7 @@ public class FileServiceImpl implements FileService {
     @Transactional(readOnly = true)
     public List<FileResponse> getActiveFiles(String parentType, Integer parentId) {
         String normalized = normalizeParentType(parentType);
-        contractFileAccessPolicy.requireAccess(normalized, parentId);
+        contractFileAccessPolicy.requireRead(normalized, parentId);
         List<UploadFile> files =
                 uploadFileRepository.findByFileParentTypeAndFileParentIdAndDeleteYnOrderBySortOrderAscFileIdAsc(
                         normalized, parentId, NOT_DELETED);
@@ -106,7 +106,7 @@ public class FileServiceImpl implements FileService {
     public Map<Integer, List<FileResponse>> getActiveFilesMap(String parentType, List<Integer> parentIds) {
         if (parentIds == null || parentIds.isEmpty()) return Map.of();
         String normalized = normalizeParentType(parentType);
-        parentIds.forEach(parentId -> contractFileAccessPolicy.requireAccess(normalized, parentId));
+        parentIds.forEach(parentId -> contractFileAccessPolicy.requireRead(normalized, parentId));
         List<UploadFile> all = uploadFileRepository.findActiveByParentTypeAndParentIds(normalized, parentIds);
         return all.stream()
                 .collect(Collectors.groupingBy(
@@ -120,7 +120,7 @@ public class FileServiceImpl implements FileService {
     public FileResponse getFile(Integer fileId) {
         UploadFile file = uploadFileRepository.findByFileIdAndDeleteYn(fileId, NOT_DELETED)
                 .orElseThrow(() -> new BusinessException(ErrorCode.FILE_NOT_FOUND));
-        contractFileAccessPolicy.requireAccess(file.getFileParentType(), file.getFileParentId());
+        contractFileAccessPolicy.requireRead(file.getFileParentType(), file.getFileParentId());
         return FileResponse.fromEntity(file, storageService);
     }
 
@@ -129,6 +129,7 @@ public class FileServiceImpl implements FileService {
     public List<FileResponse> getAllFilesForAdmin(String parentType, Integer parentId) {
         contractFileAccessPolicy.requireAdministrator();
         String normalized = normalizeParentType(parentType);
+        contractFileAccessPolicy.requireRead(normalized, parentId);
         List<UploadFile> files =
                 uploadFileRepository.findByFileParentTypeAndFileParentIdOrderBySortOrderAscFileIdAsc(normalized, parentId);
         return files.stream().map(f -> FileResponse.fromEntity(f, storageService)).toList();
@@ -140,6 +141,7 @@ public class FileServiceImpl implements FileService {
         contractFileAccessPolicy.requireAdministrator();
         UploadFile file = uploadFileRepository.findById(fileId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.FILE_NOT_FOUND));
+        contractFileAccessPolicy.requireRead(file.getFileParentType(), file.getFileParentId());
         return FileResponse.fromEntity(file, storageService);
     }
 
@@ -148,30 +150,42 @@ public class FileServiceImpl implements FileService {
         if (fileIds == null || fileIds.isEmpty()) return;
         // Validate every actual private target before the bulk update changes any row.
         uploadFileRepository.findAllById(fileIds).forEach(file ->
-                contractFileAccessPolicy.requireAccess(file.getFileParentType(), file.getFileParentId()));
+                contractFileAccessPolicy.requireWrite(file.getFileParentType(), file.getFileParentId()));
         uploadFileRepository.softDeleteByIds(fileIds);
     }
 
     @Override
     public void softDeleteFilesByParent(String parentType, Integer parentId, List<Integer> fileIds) {
-        contractFileAccessPolicy.requireAccess(parentType, parentId);
-        if (fileIds == null || fileIds.isEmpty()) return;
         String normalized = normalizeParentType(parentType);
+        contractFileAccessPolicy.requireWrite(normalized, parentId);
+        if (fileIds == null || fileIds.isEmpty()) return;
+        requireMatchingTargets(normalized, parentId, fileIds);
         uploadFileRepository.softDeleteByIdsAndParent(fileIds, normalized, parentId);
     }
 
     @Override
     @Transactional
     public void updateFileOrder(String parentType, Integer parentId, List<Integer> orderedFileIds) {
-        contractFileAccessPolicy.requireAccess(parentType, parentId);
-        if (orderedFileIds == null || orderedFileIds.isEmpty()) return;
         String normalized = normalizeParentType(parentType);
+        contractFileAccessPolicy.requireWrite(normalized, parentId);
+        if (orderedFileIds == null || orderedFileIds.isEmpty()) return;
+        requireMatchingTargets(normalized, parentId, orderedFileIds);
         for (int i = 0; i < orderedFileIds.size(); i++) {
             uploadFileRepository.updateSortOrder(orderedFileIds.get(i), normalized, parentId, i);
         }
     }
 
     // ── private ──────────────────────────────────────────────────────────────
+
+    private void requireMatchingTargets(String parentType, Integer parentId, List<Integer> fileIds) {
+        for (UploadFile file : uploadFileRepository.findAllById(fileIds)) {
+            contractFileAccessPolicy.requireWrite(file.getFileParentType(), file.getFileParentId());
+            if (!parentType.equals(normalizeParentType(file.getFileParentType()))
+                    || !java.util.Objects.equals(parentId, file.getFileParentId())) {
+                throw new BusinessException(ErrorCode.FORBIDDEN);
+            }
+        }
+    }
 
     private UploadFile saveSingle(
             String parentType,

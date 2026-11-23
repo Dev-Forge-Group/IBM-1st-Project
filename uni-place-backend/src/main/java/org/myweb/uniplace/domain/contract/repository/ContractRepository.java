@@ -11,12 +11,13 @@ import org.myweb.uniplace.domain.contract.domain.enums.ContractStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface ContractRepository extends JpaRepository<Contract, Integer> {
+public interface ContractRepository extends JpaRepository<Contract, Integer>, JpaSpecificationExecutor<Contract> {
 
     boolean existsByContractIdAndUser_UserId(Integer contractId, String userId);
 
@@ -147,6 +148,17 @@ public interface ContractRepository extends JpaRepository<Contract, Integer> {
             @Param("buildingId") Integer buildingId,
             @Param("status") ContractStatus status
     );
+
+    @Query("""
+        select count(c) > 0 from Contract c
+        where c.user.userId = :userId and c.room.building.buildingId = :buildingId
+          and c.contractSt = :status and c.contractStart <= :today and c.contractEnd >= :today
+          and exists (select r.residentId from Resident r where r.contractId = c.contractId
+                      and r.userId = :userId and r.buildingId = :buildingId)
+    """)
+    boolean existsActiveResidentContractByUserAndBuilding(
+            @Param("userId") String userId, @Param("buildingId") Integer buildingId,
+            @Param("status") ContractStatus status, @Param("today") LocalDate today);
 
     @Query("""
         select c

@@ -1,18 +1,7 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../../../features/user/hooks/useAuth';
-
-function normalizeRole(user) {
-  const raw =
-    user?.userRole ??
-    user?.role ??
-    user?.userRl ??
-    user?.user_role ??
-    user?.authority ??
-    user?.authorities?.[0];
-
-  return String(raw ?? '').toLowerCase();
-}
+import { hasAccountRole } from '../../../shared/auth/accountAccess';
 
 export default function RequireRole({ allow = [] }) {
   const { user, loading } = useAuth();
@@ -21,8 +10,7 @@ export default function RequireRole({ allow = [] }) {
     return <div style={{ padding: 24, fontWeight: 700 }}>로딩중...</div>;
   if (!user) return <Navigate to="/login" replace />;
 
-  const role = normalizeRole(user);
-  const ok = allow.map((r) => String(r).toLowerCase()).includes(role);
+  const ok = allow.some((role) => hasAccountRole(user, role));
 
   if (!ok) return <Navigate to="/" replace />;
 

@@ -2,8 +2,10 @@ package org.myweb.uniplace.domain.ai.application.tool;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.myweb.uniplace.domain.user.domain.enums.UserRole;
-import org.myweb.uniplace.domain.user.repository.UserRepository;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
+import org.myweb.uniplace.global.security.AuthUser;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.myweb.uniplace.domain.reservation.domain.enums.TourStatus;
 import org.myweb.uniplace.domain.reservation.repository.TourReservationRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -36,7 +38,7 @@ public class AiToolExecutor {
     private final JdbcTemplate jdbcTemplate;
     private final AiPublicReads publicReads;
     private final TourReservationRepository tourRepository;
-    private final UserRepository userRepository;
+    private final OwnershipAccess ownership;
 
     @Transactional(readOnly = true)
     public AiToolResponse execute(AiToolRequest req) {
@@ -49,7 +51,7 @@ public class AiToolExecutor {
         try {
             return switch (tool) {
                 case "query_database"              -> executePublicSql(args);
-                case "query_database_admin"        -> executeAdminSql(args, userId);   // AI 내부 집계용: requiresAuth 우회, userId 필요
+                case "query_database_admin"        -> AiToolResponse.fail("계정 관리자는 업무 데이터 조회 도구를 사용할 수 없습니다.");
                 case "query_my_data"               -> executePrivateSql(args, userId);
                 case "get_tour_available_slots"    -> getTourSlots(args);
                 case "search_community_posts"      -> rows(publicReads.searchCommunityPosts(
@@ -71,40 +73,6 @@ public class AiToolExecutor {
             log.error("[AiToolExecutor] 실행 오류 tool={}: {}", tool, e.getMessage(), e);
             return AiToolResponse.fail("도구 실행 중 오류가 발생했습니다.");
         }
-    }
-
-    // ── 어드민 SQL 실행 (requiresAuth 우회 — ADMIN 엔드포인트 전용) ──────────
-
-    private AiToolResponse executeAdminSql(Map<String, Object> args, String userId) {
-        // AI 내부에서만 호출 가능 — userId가 있는(로그인된) 요청에서만 허용
-        if (userId == null || userId.isBlank()) {
-            log.warn("[AiToolExecutor] query_database_admin: userId 없음 → 차단");
-            return AiToolResponse.authRequired();
-        }
-        if (!isAdminUser(userId)) {
-            log.warn("[AiToolExecutor] query_database_admin: non-admin userId={} denied", userId);
-            return AiToolResponse.authRequired();
-        }
-
-        String sql  = getString(args, "sql");
-        String desc = getString(args, "description");
-
-        if (sql == null || sql.isBlank()) {
-            return AiToolResponse.fail("SQL이 전달되지 않았습니다.");
-        }
-
-        // SELECT 전용, 위험 키워드 차단 — 어드민도 DDL/DML 금지. 비밀 테이블·컬럼은 AiDataContract가 막는다.
-        SqlValidator.validate(sql);
-        String contracted = AiSqlRewriter.rewrite(sql, AiDataContract.Audience.ADMIN, userId);
-
-        log.info("[AiToolExecutor] SQL실행(어드민): {}", sql.substring(0, Math.min(150, sql.length())));
-        List<Map<String, Object>> rows = runNativeQuery(contracted);
-
-        Map<String, Object> meta = new LinkedHashMap<>();
-        meta.put("total", rows.size());
-        if (desc != null) meta.put("description", desc);
-
-        return AiToolResponse.ok(rows, meta);
     }
 
     // ── 공개 SQL 실행 ────────────────────────────────────────────────────────
@@ -138,8 +106,17 @@ public class AiToolExecutor {
 
     // ── 개인 SQL 실행 (user_id 강제 치환) ────────────────────────────────────
 
-    private AiToolResponse executePrivateSql(Map<String, Object> args, String userId) {
-        if (userId == null || userId.isBlank()) {
+    private AiToolResponse executePrivateSql(Map<String, Object> args, String claimedUserId) {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()
+                || authentication instanceof AnonymousAuthenticationToken
+                || !(authentication.getPrincipal() instanceof AuthUser principal)
+                || !"MEMBER".equals(principal.getAccountKind())
+                || principal.getUserId() == null || principal.getUserId().isBlank()) return AiToolResponse.authRequired();
+        String userId = principal.getUserId();
+        var access = ownership.effectiveAccess(userId);
+        if (!"MEMBER".equals(access.accountKind()) || access.roles().isEmpty()
+                || (claimedUserId != null && !claimedUserId.isBlank() && !userId.equals(claimedUserId))) {
             return AiToolResponse.authRequired();
         }
 
@@ -172,6 +149,8 @@ public class AiToolExecutor {
 
     private AiToolResponse getTourSlots(Map<String, Object> args) {
         Integer roomId = getInt(args, "room_id");
+        if (roomId == null) return AiToolResponse.fail("공개된 방을 먼저 선택해 주세요.");
+        ownership.requirePublicRoom(roomId);
         List<TourStatus> inactive = List.of(TourStatus.cancelled, TourStatus.ended);
 
         List<Map<String, Object>> slots = new ArrayList<>();
@@ -252,10 +231,6 @@ public class AiToolExecutor {
         if (v instanceof java.time.LocalDate ld) return ld.toString();
         if (v instanceof byte[] b) return new String(b);
         return v;
-    }
-
-    private boolean isAdminUser(String userId) {
-        return userRepository.existsByUserIdAndUserRole(userId, UserRole.admin);
     }
 
     // ── 슬롯 헬퍼 ────────────────────────────────────────────────────────────

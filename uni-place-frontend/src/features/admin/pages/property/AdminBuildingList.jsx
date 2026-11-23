@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { adminApi } from '../../api/adminApi';
+import { Link } from 'react-router-dom';
+import { ownerApi as adminApi } from '../../../owner/api/ownerApi';
 import AdminPropertyListTable from './AdminPropertyListTable';
 import AdminBuildingModal from './AdminBuildingModal';
 import styles from './AdminPropertyListTable.module.css';
@@ -21,6 +22,9 @@ export default function AdminBuildingList() {
   );
 
   const columns = [
+    { key: 'ownershipStatus', label: '소유 관계', render: (row) => ({ ACTIVE: '확인 완료', PENDING: '확인 중', INHERITED: '건물 권한 적용', REJECTED: '반려', REVOKED: '권한 회수', UNASSIGNED: '미확인' }[row.ownershipStatus] || row.ownershipStatus || '-') },
+    { key: 'publicVisible', label: '공개 상태', render: (row) => row.publicVisible ? '공개' : '확인 후 공개' },
+    { key: 'claim', label: '소유 관계 확인', render: (row) => row.ownershipStatus !== 'ACTIVE' ? <Link to={`/owner/claims?resourceType=BUILDING&resourceId=${row.buildingId}`} onClick={(event) => event.stopPropagation()}>확인 정보 제출</Link> : '-' },
     { key: 'buildingId', label: '건물 ID' },
     { key: 'buildingNm', label: '건물명' },
     { key: 'buildingAddr', label: '주소' },

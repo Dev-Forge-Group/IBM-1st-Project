@@ -3,7 +3,6 @@ package org.myweb.uniplace.domain.property.application;
 
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import java.util.Set;
 
 import org.myweb.uniplace.domain.file.api.dto.request.FileUploadRequest;
@@ -17,6 +16,9 @@ import org.myweb.uniplace.domain.property.api.dto.response.BuildingSummaryRespon
 import org.myweb.uniplace.domain.property.domain.entity.Building;
 import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.domain.property.repository.BuildingRepository;
+import org.myweb.uniplace.domain.property.repository.PropertySpecifications;
+import org.myweb.uniplace.domain.property.repository.RoomRepository;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.global.exception.BusinessException;
 import org.myweb.uniplace.global.exception.ErrorCode;
 
@@ -33,7 +35,9 @@ import lombok.RequiredArgsConstructor;
 public class BuildingServiceImpl implements BuildingService {
 
     private final BuildingRepository buildingRepository;
+    private final RoomRepository roomRepository;
     private final FileService fileService;
+    private final OwnershipAccess ownershipAccess;
 
     private static final Set<String> IMAGE_EXTS =
             Set.of(".png", ".jpg", ".jpeg", ".gif", ".webp");
@@ -46,70 +50,70 @@ public class BuildingServiceImpl implements BuildingService {
     @Override
     @Transactional(readOnly = true)
     public BuildingDetailResponse getBuilding(Integer buildingId) {
+        ownershipAccess.requirePublicBuilding(buildingId);
         Building building = buildingRepository.findByBuildingIdAndDeleteYn(buildingId, "N")
                 .orElseThrow(() -> new BusinessException(ErrorCode.BUILDING_NOT_FOUND));
         List<FileResponse> files =
                 fileService.getActiveFiles(FileRefType.BUILDING.dbValue(), buildingId);
-        return BuildingDetailResponse.fromEntity(building, files);
+        return BuildingDetailResponse.fromPublicEntity(building, files);
     }
 
     @Override
     @Transactional(readOnly = true)
     public BuildingDetailResponse getBuildingForAdmin(Integer buildingId) {
+        ownershipAccess.requireCanManageBuilding(buildingId);
         Building building = buildingRepository.findById(buildingId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.BUILDING_NOT_FOUND));
         List<FileResponse> files =
                 fileService.getActiveFiles(FileRefType.BUILDING.dbValue(), buildingId);
-        return BuildingDetailResponse.fromEntity(building, files);
+        return ownerResponse(building, files);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<BuildingSummaryResponse> searchPage(Pageable pageable) {
-        Page<Building> page = buildingRepository.findAllByDeleteYn("N", pageable);
-        List<Integer> buildingIds = page.getContent().stream()
-                .map(Building::getBuildingId).toList();
-        Map<Integer, List<FileResponse>> filesMap =
-                fileService.getActiveFilesMap(FileRefType.BUILDING.dbValue(), buildingIds);
-
-        return page.map(b -> {
-            List<FileResponse> files = filesMap.getOrDefault(b.getBuildingId(), List.of());
-            FileResponse firstImage = files.stream()
-                    .filter(f -> f != null && isImageExt(f.getFileType()))
-                    .findFirst().orElse(null);
-            Integer thumbId  = (firstImage != null ? firstImage.getFileId()  : null);
-            String  thumbUrl = (firstImage != null ? firstImage.getViewUrl() : null);
-            return BuildingSummaryResponse.fromEntity(b, thumbId, thumbUrl);
-        });
+        return mapBuildings(buildingRepository.findAll(PropertySpecifications.buildings(
+                ownershipAccess.publicBuildingIds(), null, null, null), pageable), false);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Page<BuildingSummaryResponse> searchPageWithFilters(
-            String existElv,
-            Integer minParking,
-            String keyword,
-            Pageable pageable
-    ) {
-        Page<Building> page = buildingRepository.searchWithFilters(existElv, minParking, keyword, pageable);
-        List<Integer> buildingIds = page.getContent().stream()
-                .map(Building::getBuildingId).toList();
-        Map<Integer, List<FileResponse>> filesMap =
-                fileService.getActiveFilesMap(FileRefType.BUILDING.dbValue(), buildingIds);
+    public Page<BuildingSummaryResponse> searchOwnedPage(Pageable pageable) {
+        ownershipAccess.requireOwner();
+        return mapBuildings(buildingRepository.findAll(PropertySpecifications.buildings(
+                ownershipAccess.manageableBuildingIds(), null, null, null), pageable), true);
+    }
 
-        return page.map(b -> {
-            List<FileResponse> files = filesMap.getOrDefault(b.getBuildingId(), List.of());
-            FileResponse firstImage = files.stream()
-                    .filter(f -> f != null && isImageExt(f.getFileType()))
-                    .findFirst().orElse(null);
-            Integer thumbId  = (firstImage != null ? firstImage.getFileId()  : null);
-            String  thumbUrl = (firstImage != null ? firstImage.getViewUrl() : null);
-            return BuildingSummaryResponse.fromEntity(b, thumbId, thumbUrl);
+    @Override
+    @Transactional(readOnly = true)
+    public Page<BuildingSummaryResponse> searchPageWithFilters(String existElv, Integer minParking,
+            String keyword, Pageable pageable) {
+        return mapBuildings(buildingRepository.findAll(PropertySpecifications.buildings(
+                ownershipAccess.publicBuildingIds(), existElv, minParking, keyword), pageable), false);
+    }
+
+    private Page<BuildingSummaryResponse> mapBuildings(Page<Building> page, boolean owner) {
+        List<Integer> ids = page.getContent().stream().map(Building::getBuildingId).toList();
+        Map<Integer, List<FileResponse>> filesMap = fileService.getActiveFilesMap(FileRefType.BUILDING.dbValue(), ids);
+        return page.map(building -> {
+            FileResponse image = filesMap.getOrDefault(building.getBuildingId(), List.of()).stream()
+                    .filter(file -> file != null && isImageExt(file.getFileType())).findFirst().orElse(null);
+            BuildingSummaryResponse response = BuildingSummaryResponse.fromEntity(building,
+                    image == null ? null : image.getFileId(), image == null ? null : image.getViewUrl());
+            return owner ? response.withOwnershipStatus(ownershipAccess.buildingStatus(building.getBuildingId()))
+                    .withPublicVisibility(ownershipAccess.isPublicBuilding(building.getBuildingId())) : response;
         });
+    }
+
+    private BuildingDetailResponse ownerResponse(Building building, List<FileResponse> files) {
+        return BuildingDetailResponse.fromEntity(building, files)
+                .withOwnershipStatus(ownershipAccess.buildingStatus(building.getBuildingId()))
+                .withPublicVisibility(ownershipAccess.isPublicBuilding(building.getBuildingId()));
     }
 
     @Override
     public BuildingDetailResponse createBuilding(BuildingCreateRequest request) {
+        ownershipAccess.requireOwner();
         List<Building> existing = buildingRepository.findByBuildingNmAndDeleteYn(request.getBuildingNm(), "N");
         if (existing != null && !existing.isEmpty()) {
             throw new BusinessException(ErrorCode.BUILDING_DUPLICATE);
@@ -131,6 +135,7 @@ public class BuildingServiceImpl implements BuildingService {
                 .build();
 
         Building saved = buildingRepository.save(building);
+        ownershipAccess.registerNewBuilding(saved.getBuildingId());
 
         if (request.getFiles() != null && !request.getFiles().isEmpty()) {
             fileService.uploadFiles(FileUploadRequest.builder()
@@ -142,18 +147,19 @@ public class BuildingServiceImpl implements BuildingService {
 
         List<FileResponse> files =
                 fileService.getActiveFiles(FileRefType.BUILDING.dbValue(), saved.getBuildingId());
-        return BuildingDetailResponse.fromEntity(saved, files);
+        return ownerResponse(saved, files);
     }
 
     @Override
     public BuildingDetailResponse updateBuilding(Integer buildingId, BuildingUpdateRequest request) {
+        ownershipAccess.requireCanManageBuilding(buildingId);
         Building building = buildingRepository.findByBuildingIdAndDeleteYn(buildingId, "N")
                 .orElseThrow(() -> new BusinessException(ErrorCode.BUILDING_NOT_FOUND));
 
         if (request == null) {
             List<FileResponse> files =
                     fileService.getActiveFiles(FileRefType.BUILDING.dbValue(), buildingId);
-            return BuildingDetailResponse.fromEntity(building, files);
+            return ownerResponse(building, files);
         }
 
         String newNm = request.getBuildingNm();
@@ -202,18 +208,19 @@ public class BuildingServiceImpl implements BuildingService {
         Building saved = buildingRepository.save(building);
         List<FileResponse> files =
                 fileService.getActiveFiles(FileRefType.BUILDING.dbValue(), buildingId);
-        return BuildingDetailResponse.fromEntity(saved, files);
+        return ownerResponse(saved, files);
     }
 
     @Override
     public void deleteBuilding(Integer buildingId) {
+        ownershipAccess.requireCanManageBuilding(buildingId);
         Building building = buildingRepository.findById(buildingId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.BUILDING_NOT_FOUND));
         if (building.isDeleted()) return;
-        List<Room> rooms = building.getRooms();
-        if (rooms != null) {
-            rooms.forEach(Room::softDelete);
-        }
+        List<Room> rooms = roomRepository.findAllByBuilding_BuildingIdAndDeleteYn(buildingId, "N");
+        // Check every unit before changing anything, including a separately owned unit.
+        rooms.forEach(room -> ownershipAccess.requireCanManageRoom(room.getRoomId()));
+        rooms.forEach(Room::softDelete);
         building.softDelete();
         buildingRepository.save(building);
     }

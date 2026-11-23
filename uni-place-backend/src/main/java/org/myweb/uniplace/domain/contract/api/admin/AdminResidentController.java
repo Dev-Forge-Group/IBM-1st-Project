@@ -4,7 +4,7 @@ import java.util.List;
 
 import org.myweb.uniplace.domain.contract.api.dto.request.ResidentCreateRequest;
 import org.myweb.uniplace.domain.contract.api.dto.response.ResidentResponse;
-import org.myweb.uniplace.domain.contract.application.ResidentService;
+import org.myweb.uniplace.domain.contract.application.OwnerContractService;
 import org.myweb.uniplace.global.response.ApiResponse;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -13,10 +13,10 @@ import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/admin/residents")
+@RequestMapping("/owner/residents")
 public class AdminResidentController {
 
-    private final ResidentService residentService;
+    private final OwnerContractService residentService;
 
     /**
      * 거주자 목록(관리자)
@@ -24,7 +24,7 @@ public class AdminResidentController {
      */
     @GetMapping
     public ApiResponse<List<ResidentResponse>> getResidentList() {
-        return ApiResponse.ok(residentService.getResidentList());
+        return ApiResponse.ok(residentService.residents());
     }
     
     // ✅ 거주자 생성(관리자 수동)

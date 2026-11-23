@@ -8,12 +8,13 @@ import org.myweb.uniplace.domain.property.domain.entity.Building;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface BuildingRepository extends JpaRepository<Building, Integer> {
+public interface BuildingRepository extends JpaRepository<Building, Integer>, JpaSpecificationExecutor<Building> {
 
     // ✅ 단건 조회 - 삭제되지 않은 건물만 (일반 사용자용)
     Optional<Building> findByBuildingIdAndDeleteYn(Integer buildingId, String deleteYn);

@@ -5,6 +5,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.myweb.uniplace.domain.contract.domain.entity.Contract;
 import org.myweb.uniplace.domain.user.domain.entity.User;
+import org.myweb.uniplace.domain.user.repository.UserRepository;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.file.api.dto.request.FileUploadRequest;
 import org.myweb.uniplace.domain.file.api.dto.response.FileResponse;
 import org.myweb.uniplace.domain.file.api.dto.response.FileUploadResponse;
@@ -38,6 +40,8 @@ import java.util.Map;
 public class ContractImageServiceImpl implements ContractImageService {
 
     private final FileService fileService;
+    private final OwnershipAccess ownershipAccess;
+    private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
     private final StorageService storageService;   // ← 추가: 로컬/S3 겸용 읽기에 사용
     private final UploadProperties uploadProperties; // ← 추가: 로컬 여부 판단용
@@ -266,6 +270,19 @@ public class ContractImageServiceImpl implements ContractImageService {
         m.put("building_lessor_tel",  safe(building != null ? building.getBuildingLessorTel() : ""));
         m.put("building_lessor_addr", safe(building != null ? building.getBuildingLessorAddr() : ""));
         m.put("building_lessor_rrn",  maskRrn(building != null ? building.getBuildingLessorRrn() : ""));
+        // A separately owned unit or transferred building must not inherit another owner's private identity.
+        var ownerIds = ownershipAccess.contractOwnerIds(contract.getContractId());
+        if (!ownerIds.isEmpty() && (building == null || ownerIds.stream()
+                .anyMatch(id -> !ownershipAccess.canManageBuilding(id, building.getBuildingId())))) {
+            var owners = userRepository.findAllById(ownerIds);
+            m.put("building_lessor_nm", owners.stream().map(User::getUserNm)
+                    .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.joining(", ")));
+            m.put("building_lessor_tel", owners.stream().map(User::getUserTel)
+                    .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.joining(" / ")));
+            m.put("building_lessor_addr", "");
+            m.put("building_lessor_rrn", "");
+        }
+
 
         m.put("lessor_nm",   safe(contract.getLessorNm()));
         m.put("lessor_tel",  safe(contract.getLessorTel()));

@@ -21,7 +21,7 @@ import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/admin/space-reservations")
+@RequestMapping("/owner/space-reservations")
 public class AdminSpaceReservationController {
 
     private final SpaceReservationService spaceReservationService;

@@ -1,9 +1,10 @@
 package org.myweb.uniplace.domain.file.api.dto.response;
 
 import java.time.LocalDateTime;
+import java.util.Set;
+import java.util.Locale;
 
 import org.myweb.uniplace.domain.file.domain.entity.UploadFile;
-import org.myweb.uniplace.domain.file.domain.enums.FileRefType;
 import org.myweb.uniplace.global.storage.StorageService;
 
 import lombok.*;
@@ -24,20 +25,19 @@ public class FileResponse {
     private String fileType;
     private LocalDateTime createdAt;
 
-    // 환경에 따라 로컬 URL or S3 URL
+    // Protected property/contract files always use the authorization proxy.
     private String viewUrl;
     private String downloadUrl;
     private String adminViewUrl;
     private String adminDownloadUrl;
 
     /**
-     * 계약 파일은 인증 proxy를 사용하고 공개 파일은 환경에 맞는 URL을 생성한다.
-     * - 로컬: /files/{id}/view
-     * - S3:   https://bucket.s3.region.amazonaws.com/ROOM/10/.../file.jpg
+     * Property and contract visibility can change after upload, so their URLs always recheck access.
+     * Other domains retain the configured local/S3 URL contract.
      */
     public static FileResponse fromEntity(UploadFile e, StorageService storage) {
         if (e.getFileParentType() != null
-                && FileRefType.CONTRACT.dbValue().equalsIgnoreCase(e.getFileParentType().trim())) {
+                && Set.of("CONTRACT", "ROOM", "BUILDING", "SPACE").contains(e.getFileParentType().trim().toUpperCase(Locale.ROOT))) {
             return fromEntity(e);
         }
         Integer id = e.getFileId();
@@ -86,8 +86,8 @@ public class FileResponse {
                 .createdAt(e.getCreatedAt())
                 .viewUrl("/files/" + id + "/view")
                 .downloadUrl("/files/" + id + "/download")
-                .adminViewUrl("/files/admin/" + id + "/view")
-                .adminDownloadUrl("/files/admin/" + id + "/download")
+                .adminViewUrl("/files/" + id + "/view")
+                .adminDownloadUrl("/files/" + id + "/download")
                 .build();
     }
 }

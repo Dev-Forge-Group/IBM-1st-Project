@@ -1,7 +1,7 @@
 // 경로: org/myweb/uniplace/domain/review/repository/ReviewRepository.java
 package org.myweb.uniplace.domain.review.repository;
 
-import java.util.List;
+import java.util.Collection;
 
 import org.myweb.uniplace.domain.review.domain.entity.Review;
 import org.springframework.data.domain.Page;
@@ -57,6 +57,27 @@ public interface ReviewRepository extends JpaRepository<Review, Integer> {
             @Param("minRating")  Integer minRating,
             @Param("maxRating")  Integer maxRating,
             @Param("buildingNm") String  buildingNm,
+            Pageable pageable
+    );
+
+    /** Public room scope applies to both the result page and its count. */
+    @Query("""
+        select r from Review r
+         join Room rm on rm.roomId = r.roomId
+         join rm.building b
+         where r.roomId in :publicRoomIds
+           and (:roomId     is null or r.roomId  = :roomId)
+           and (:minRating  is null or r.rating >= :minRating)
+           and (:maxRating  is null or r.rating <= :maxRating)
+           and (:buildingNm is null or :buildingNm = ''
+                or lower(b.buildingNm) like lower(concat('%', :buildingNm, '%')))
+    """)
+    Page<Review> searchPublishedWithFilters(
+            @Param("publicRoomIds") Collection<Integer> publicRoomIds,
+            @Param("roomId") Integer roomId,
+            @Param("minRating") Integer minRating,
+            @Param("maxRating") Integer maxRating,
+            @Param("buildingNm") String buildingNm,
             Pageable pageable
     );
 }

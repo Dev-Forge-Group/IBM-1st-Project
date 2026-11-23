@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useRef } from 'react';
-import { adminApi } from '../../api/adminApi';
+import { ownerApi as adminApi } from '../../../owner/api/ownerApi';
 import FileUploader from '../../../file/components/FileUploader';
 import useFileUpload from '../../../file/hooks/useFileUpload';
 import styles from './AdminCreateModal.module.css';
@@ -263,6 +263,7 @@ export default function AdminBuildingModal({ buildingId, onClose, onSuccess }) {
             <div className={styles.section}>
               <h3 className={styles.sectionTitle}>이미지</h3>
               <FileUploader
+                authenticatedExisting
                 existingFiles={existingFiles}
                 newFiles={fu.newFiles}
                 previews={fu.previews}

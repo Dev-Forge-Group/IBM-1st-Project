@@ -11,6 +11,7 @@ import org.myweb.uniplace.domain.ai.application.gateway.AiGateway;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayRequest;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayResponse;
 import org.myweb.uniplace.domain.ai.domain.AiIntent;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.reservation.domain.enums.TourStatus;
 import org.myweb.uniplace.domain.reservation.repository.TourReservationRepository;
 import org.springframework.stereotype.Component;
@@ -22,10 +23,12 @@ public class TourInfoUseCase extends AbstractForwardUseCase {
     private static final List<TourStatus> INACTIVE = List.of(TourStatus.cancelled, TourStatus.ended);
 
     private final TourReservationRepository tourRepository;
+    private final OwnershipAccess ownership;
 
-    public TourInfoUseCase(AiGateway aiGateway, TourReservationRepository tourRepository) {
+    public TourInfoUseCase(AiGateway aiGateway, TourReservationRepository tourRepository, OwnershipAccess ownership) {
         super(aiGateway);
         this.tourRepository = tourRepository;
+        this.ownership = ownership;
     }
 
     @Override
@@ -38,6 +41,7 @@ public class TourInfoUseCase extends AbstractForwardUseCase {
         Integer roomId = null;
         Object roomIdObj = slots.get("roomId");
         if (roomIdObj instanceof Number n) roomId = n.intValue();
+        if (roomId != null) ownership.requirePublicRoom(roomId);
 
         slots.put("items", fetchTourSlots(roomId));
         slots.put("tour_guide",

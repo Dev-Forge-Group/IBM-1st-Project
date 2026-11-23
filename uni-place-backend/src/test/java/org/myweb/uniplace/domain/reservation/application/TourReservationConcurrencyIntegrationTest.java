@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.reservation.application;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.clearInvocations;
@@ -34,6 +36,9 @@ import org.myweb.uniplace.domain.reservation.domain.entity.TourReservationEntity
 import org.myweb.uniplace.domain.reservation.domain.enums.TourStatus;
 import org.myweb.uniplace.domain.reservation.repository.TourReservationRepository;
 import org.myweb.uniplace.global.exception.BusinessException;
+import org.myweb.uniplace.global.security.AuthUser;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.myweb.uniplace.global.exception.ErrorCode;
 import org.myweb.uniplace.global.slack.SlackNotificationService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -99,6 +104,7 @@ class TourReservationConcurrencyIntegrationTest {
         f = new TransactionTemplate(transactions).execute(status -> {
             Building building = buildings.saveAndFlush(Building.builder().buildingNm("IBM03 concurrency fixture")
                     .buildingAddr("Test fixture address").build());
+            rentalOperator(jdbc, "tour-race-owner-" + building.getBuildingId(), building.getBuildingId());
             return new Fixture(building.getBuildingId(), room(building, 1).getRoomId(), room(building, 2).getRoomId());
         });
         clearInvocations(notifications, slack);
@@ -244,7 +250,7 @@ class TourReservationConcurrencyIntegrationTest {
             var stale = worker.submit(() -> staleMutation(old, loaded, resume,
                     () -> tours.cancel(old, cancelRequest(hyphens(phone(1)))).getTourId()));
             await(loaded);
-            tours.changeStatus(old, TourStatus.ended);
+            changeStatusOwned(old, TourStatus.ended);
             clearInvocations(notifications, slack);
             resume.countDown();
 
@@ -392,7 +398,7 @@ class TourReservationConcurrencyIntegrationTest {
     }
 
     private Integer restore(Integer id) {
-        tours.changeStatus(id, TourStatus.confirmed);
+        changeStatusOwned(id, TourStatus.confirmed);
         return id;
     }
 
@@ -429,6 +435,18 @@ class TourReservationConcurrencyIntegrationTest {
                 """, Integer.class, f.building());
     }
 
+    private void changeStatusOwned(Integer id, TourStatus status) {
+        var previous = SecurityContextHolder.getContext().getAuthentication();
+        try {
+            AuthUser principal = new AuthUser("tour-race-owner-" + f.building(), "OWNER");
+            SecurityContextHolder.getContext().setAuthentication(
+                    UsernamePasswordAuthenticationToken.authenticated(principal, null, principal.getAuthorities()));
+            tours.changeStatus(id, status);
+        } finally {
+            SecurityContextHolder.getContext().setAuthentication(previous);
+        }
+    }
+
     private int rowCount() {
         return jdbc.queryForObject("SELECT COUNT(*) FROM room_reservation WHERE building_id = ?", Integer.class, f.building());
     }
@@ -446,8 +464,8 @@ class TourReservationConcurrencyIntegrationTest {
 
     private long notificationCount(String type) {
         return mockingDetails(notifications).getInvocations().stream()
-                .filter(invocation -> invocation.getMethod().getName().equals("notifyAdmins"))
-                .filter(invocation -> type.equals(invocation.getArgument(0))).count();
+                .filter(invocation -> invocation.getMethod().getName().equals("notifyUser"))
+                .filter(invocation -> type.equals(invocation.getArgument(1))).count();
     }
 
     private String phone(int suffix) {

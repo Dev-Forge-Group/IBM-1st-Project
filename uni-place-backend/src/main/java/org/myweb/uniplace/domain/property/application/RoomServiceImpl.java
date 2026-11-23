@@ -2,7 +2,6 @@ package org.myweb.uniplace.domain.property.application;
 
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import java.util.Set;
 
 import org.myweb.uniplace.domain.file.api.dto.request.FileUploadRequest;
@@ -19,6 +18,8 @@ import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.domain.property.domain.enums.RoomStatus;
 import org.myweb.uniplace.domain.property.repository.BuildingRepository;
 import org.myweb.uniplace.domain.property.repository.RoomRepository;
+import org.myweb.uniplace.domain.property.repository.PropertySpecifications;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.global.exception.BusinessException;
 import org.myweb.uniplace.global.exception.ErrorCode;
 
@@ -37,6 +38,7 @@ public class RoomServiceImpl implements RoomService {
     private final RoomRepository roomRepository;
     private final BuildingRepository buildingRepository;
     private final FileService fileService;
+    private final OwnershipAccess ownershipAccess;
 
     private static final Set<String> IMAGE_EXTS =
             Set.of(".png", ".jpg", ".jpeg", ".gif", ".webp");
@@ -49,6 +51,7 @@ public class RoomServiceImpl implements RoomService {
     @Override
     @Transactional(readOnly = true)
     public RoomDetailResponse getRoom(Integer roomId) {
+        ownershipAccess.requirePublicRoom(roomId);
 
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ROOM_NOT_FOUND));
@@ -60,12 +63,14 @@ public class RoomServiceImpl implements RoomService {
         List<FileResponse> files =
                 fileService.getActiveFiles(FileRefType.ROOM.dbValue(), roomId);
 
-        return RoomDetailResponse.fromEntity(room, files);
+        return RoomDetailResponse.fromPublicEntity(room, files).toBuilder()
+                .verifiedRentalOwner(!ownershipAccess.eligibleOwnerIdsForRoom(roomId).isEmpty()).build();
     }
 
     @Override
     @Transactional(readOnly = true)
     public RoomDetailResponse getRoomForAdmin(Integer roomId) {
+        ownershipAccess.requireCanManageRoom(roomId);
 
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ROOM_NOT_FOUND));
@@ -73,73 +78,54 @@ public class RoomServiceImpl implements RoomService {
         List<FileResponse> files =
                 fileService.getActiveFiles(FileRefType.ROOM.dbValue(), roomId);
 
-        return RoomDetailResponse.fromEntity(room, files);
+        return ownerResponse(room, files);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<RoomSummaryResponse> searchPage(RoomSearchRequest request, Pageable pageable) {
+        return mapRooms(roomRepository.findAll(PropertySpecifications.rooms(
+                ownershipAccess.publicRoomIds(), request), pageable), false);
+    }
 
-        Page<Room> page = roomRepository.searchWithFilters(
-                request.getBuildingId(),
-                request.getBuildingNm(),
-                request.getBuildingAddr(),
-                request.getMinParkingCapacity(),
+    @Override
+    @Transactional(readOnly = true)
+    public Page<RoomSummaryResponse> searchOwnedPage(RoomSearchRequest request, Pageable pageable) {
+        ownershipAccess.requireOwner();
+        return mapRooms(roomRepository.findAll(PropertySpecifications.rooms(
+                ownershipAccess.manageableRoomIds(), request), pageable), true);
+    }
 
-                request.getRoomNo(),
-                request.getFloor(),
-
-                request.getMinRoomSize(),
-                request.getMaxRoomSize(),
-
-                request.getRoomType(),
-                request.getPetAllowedYn(),
-
-                request.getMinDeposit(),
-                request.getMaxDeposit(),
-
-                request.getMinRentPrice(),
-                request.getMaxRentPrice(),
-
-                request.getMinManageFee(),
-                request.getMaxManageFee(),
-
-                request.getRentType(),
-                request.getRoomSt(),
-                request.getSunDirection(),
-
-                request.getMinRoomCapacity(),
-                request.getMaxRoomCapacity(),
-
-                request.getMinRentMin(),
-                request.getMaxRentMin(),
-
-                request.getRoomOptions(),
-
-                pageable
-        );
-
-        // N+1 방지: 페이지 내 roomId 목록으로 파일 한 번에 조회
-        List<Integer> roomIds = page.getContent().stream()
-                .map(Room::getRoomId).toList();
-        Map<Integer, List<FileResponse>> filesMap =
-                fileService.getActiveFilesMap(FileRefType.ROOM.dbValue(), roomIds);
-
+    private Page<RoomSummaryResponse> mapRooms(Page<Room> page, boolean owner) {
+        List<Integer> ids = page.getContent().stream().map(Room::getRoomId).toList();
+        Map<Integer, List<FileResponse>> filesMap = fileService.getActiveFilesMap(FileRefType.ROOM.dbValue(), ids);
         return page.map(room -> {
-            List<FileResponse> files = filesMap.getOrDefault(room.getRoomId(), List.of());
-            FileResponse firstImage = files.stream()
-                    .filter(f -> f != null && isImageExt(f.getFileType()))
-                    .findFirst().orElse(null);
-            Integer thumbId  = (firstImage != null ? firstImage.getFileId()  : null);
-            String  thumbUrl = (firstImage != null ? firstImage.getViewUrl() : null);
-            return RoomSummaryResponse.fromEntity(room, thumbId, thumbUrl);
+            FileResponse image = filesMap.getOrDefault(room.getRoomId(), List.of()).stream()
+                    .filter(file -> file != null && isImageExt(file.getFileType())).findFirst().orElse(null);
+            RoomSummaryResponse response = RoomSummaryResponse.fromEntity(room,
+                    image == null ? null : image.getFileId(), image == null ? null : image.getViewUrl());
+            return owner ? response.withOwnershipStatus(ownershipAccess.roomStatus(room.getRoomId()))
+                    .withPublicVisibility(ownershipAccess.isPublicRoom(room.getRoomId())) : response;
         });
+    }
+
+    private RoomDetailResponse ownerResponse(Room room, List<FileResponse> files) {
+        String ownerId = ownershipAccess.requireOwner();
+        Building building = room.getBuilding();
+        boolean buildingManagementAllowed = building != null
+                && ownershipAccess.canManageBuilding(ownerId, building.getBuildingId());
+        RoomDetailResponse response = buildingManagementAllowed
+                ? RoomDetailResponse.fromEntity(room, files) : RoomDetailResponse.fromPublicEntity(room, files);
+        return response.withOwnershipStatus(ownershipAccess.roomStatus(room.getRoomId()))
+                .withPublicVisibility(ownershipAccess.isPublicRoom(room.getRoomId()))
+                .withBuildingManagement(buildingManagementAllowed);
     }
 
     @Override
     public RoomDetailResponse createRoom(RoomCreateRequest request) {
-
-        Building building = resolveBuildingByName(request.getBuildingNm());
+        ownershipAccess.requireOwner();
+        Building building = resolveBuilding(request.getBuildingId(), request.getBuildingNm());
+        ownershipAccess.requireCanManageBuilding(building.getBuildingId());
 
         Room room = Room.builder()
                 .building(building)
@@ -161,6 +147,7 @@ public class RoomServiceImpl implements RoomService {
                 .build();
 
         Room saved = roomRepository.save(room);
+        ownershipAccess.registerNewRoom(saved.getRoomId(), building.getBuildingId());
 
         if (request.getFiles() != null && !request.getFiles().isEmpty()) {
             fileService.uploadFiles(FileUploadRequest.builder()
@@ -173,11 +160,13 @@ public class RoomServiceImpl implements RoomService {
         List<FileResponse> files =
                 fileService.getActiveFiles(FileRefType.ROOM.dbValue(), saved.getRoomId());
 
-        return RoomDetailResponse.fromEntity(saved, files);
+        return ownerResponse(saved, files);
     }
 
     @Override
     public RoomDetailResponse updateRoom(Integer roomId, RoomUpdateRequest request) {
+        ownershipAccess.requireCanManageRoom(roomId);
+        if (request == null) throw new BusinessException(ErrorCode.BAD_REQUEST);
 
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ROOM_NOT_FOUND));
@@ -186,8 +175,13 @@ public class RoomServiceImpl implements RoomService {
             throw new BusinessException(ErrorCode.ROOM_NOT_FOUND);
         }
 
-        if (request.getBuildingNm() != null && !request.getBuildingNm().isBlank()) {
-            room.setBuilding(resolveBuildingByName(request.getBuildingNm()));
+        if (request.getBuildingId() != null || (request.getBuildingNm() != null && !request.getBuildingNm().isBlank())) {
+            Building target = resolveBuilding(request.getBuildingId(), request.getBuildingNm());
+            if (!target.getBuildingId().equals(room.getBuilding().getBuildingId())) {
+                ownershipAccess.requireCanManageBuilding(room.getBuilding().getBuildingId());
+                ownershipAccess.requireCanManageBuilding(target.getBuildingId());
+                room.setBuilding(target);
+            }
         }
 
         if (request.getRoomNo() != null)       room.setRoomNo(request.getRoomNo());
@@ -233,11 +227,12 @@ public class RoomServiceImpl implements RoomService {
         List<FileResponse> files =
                 fileService.getActiveFiles(FileRefType.ROOM.dbValue(), roomId);
 
-        return RoomDetailResponse.fromEntity(room, files);
+        return ownerResponse(room, files);
     }
 
     @Override
     public void changeRoomStatus(Integer roomId, RoomStatus roomStatus) {
+        ownershipAccess.requireCanManageRoom(roomId);
 
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ROOM_NOT_FOUND));
@@ -251,6 +246,7 @@ public class RoomServiceImpl implements RoomService {
 
     @Override
     public void deleteRoom(Integer roomId) {
+        ownershipAccess.requireCanManageRoom(roomId);
 
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ROOM_NOT_FOUND));
@@ -263,18 +259,19 @@ public class RoomServiceImpl implements RoomService {
         roomRepository.save(room);
     }
 
-    private Building resolveBuildingByName(String buildingNm) {
-
+    private Building resolveBuilding(Integer buildingId, String buildingNm) {
+        if (buildingId != null) {
+            Building building = buildingRepository.findByBuildingIdAndDeleteYn(buildingId, "N")
+                    .orElseThrow(() -> new BusinessException(ErrorCode.BUILDING_NOT_FOUND));
+            if (buildingNm != null && !buildingNm.isBlank() && !building.getBuildingNm().equals(buildingNm)) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST);
+            }
+            return building;
+        }
+        if (buildingNm == null || buildingNm.isBlank()) throw new BusinessException(ErrorCode.BAD_REQUEST);
         List<Building> buildings = buildingRepository.findByBuildingNmAndDeleteYn(buildingNm, "N");
-
-        if (buildings == null || buildings.isEmpty()) {
-            throw new BusinessException(ErrorCode.BUILDING_NOT_FOUND);
-        }
-
-        if (buildings.size() > 1) {
-            throw new IllegalArgumentException("건물명이 중복됩니다. buildingNm=" + buildingNm + " (buildingId로 지정 필요)");
-        }
-
+        if (buildings == null || buildings.isEmpty()) throw new BusinessException(ErrorCode.BUILDING_NOT_FOUND);
+        if (buildings.size() > 1) throw new BusinessException(ErrorCode.BAD_REQUEST);
         return buildings.get(0);
     }
 }

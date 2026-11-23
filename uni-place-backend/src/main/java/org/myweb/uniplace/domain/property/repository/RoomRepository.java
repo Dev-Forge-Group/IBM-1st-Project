@@ -18,7 +18,9 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface RoomRepository extends JpaRepository<Room, Integer> {
+public interface RoomRepository extends JpaRepository<Room, Integer>, JpaSpecificationExecutor<Room> {
+
+    List<Room> findAllByBuilding_BuildingIdAndDeleteYn(Integer buildingId, String deleteYn);
 
     // ──────────────────────────────────────────────────────────────────────
     //  기존: 검색 필터 페이징 조회

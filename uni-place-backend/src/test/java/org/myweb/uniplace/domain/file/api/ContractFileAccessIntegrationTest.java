@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.file.api;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -154,6 +156,9 @@ class ContractFileAccessIntegrationTest {
             Room room = room(rooms, building, 101);
             Contract own = contract(contracts, owner, room);
             Contract foreign = contract(contracts, other, room);
+            User operator = user(users, prefix + "-operator", UserRole.user, PASSWORD_HASH);
+            grantRentalOwner(jdbc, operator.getUserId(), building.getBuildingId(), room.getRoomId(), own.getContractId());
+            contractParty(jdbc, operator.getUserId(), foreign.getContractId());
             UploadFile document = file(files, "CONTRACT", own.getContractId(), "contract-document.png");
             UploadFile signature = file(files, "CONTRACT", own.getContractId(), "contract-signature.png");
             UploadFile deleted = file(files, "CONTRACT", own.getContractId(), "contract-deleted.png");
@@ -168,23 +173,23 @@ class ContractFileAccessIntegrationTest {
             return new Fixture(owner.getUserId(), other.getUserId(), admin.getUserId(), own.getContractId(),
                     foreign.getContractId(), room.getRoomId(), document.getFileId(), signature.getFileId(),
                     deleted.getFileId(), otherDocument.getFileId(), publicImage.getFileId(), orphan.getFileId(),
-                    document.getFilePath(), document.getRenameFilename());
+                    document.getFilePath(), document.getRenameFilename(), operator.getUserId());
         });
         writeStaticPrivateFiles(fixture.contractId(), fixture.documentName());
         clearInvocations(storage);
     }
 
     static Stream<Arguments> actorsAndReadEndpoints() {
-        return Stream.of("anonymous", "guest", "other", "owner", "admin")
+        return Stream.of("anonymous", "guest", "other", "owner", "operator", "admin")
                 .flatMap(actor -> Stream.of("metadata", "list", "view", "download")
                         .map(endpoint -> Arguments.of(actor, endpoint)));
     }
 
     @ParameterizedTest
     @MethodSource("actorsAndReadEndpoints")
-    void ordinaryContractReadsRequireTheirOwnerOrCurrentAdministrator(String actor, String endpoint) throws Exception {
+    void ordinaryContractReadsRequireTheirConsumerOrApprovedSnapshotOwner(String actor, String endpoint) throws Exception {
         Reply reply = request("GET", readPath(endpoint, false), token(actor), null, null);
-        if (List.of("owner", "admin").contains(actor)) {
+        if (List.of("owner", "operator").contains(actor)) {
             assertThat(reply.status()).isEqualTo(200);
             assertNoStore(reply);
             if ("view".equals(endpoint) || "download".equals(endpoint)) {
@@ -213,38 +218,19 @@ class ContractFileAccessIntegrationTest {
 
     @ParameterizedTest
     @MethodSource("actorsAndReadEndpoints")
-    void administratorRoutesDoNotExposeDeletedFilesToOtherActors(String actor, String endpoint) throws Exception {
+    void legacyAdministratorRoutesDenyEveryActorIncludingStaff(String actor, String endpoint) throws Exception {
         Reply reply = request("GET", readPath(endpoint, true), token(actor), null, null);
-        if ("admin".equals(actor)) {
-            assertThat(reply.status()).isEqualTo(200);
-            assertNoStore(reply);
-            if ("view".equals(endpoint) || "download".equals(endpoint)) {
-                assertThat(Arrays.equals(reply.body(), PRIVATE_PNG)).isTrue();
-                assertThat(reply.header("content-disposition"))
-                        .startsWith("view".equals(endpoint) ? "inline" : "attachment");
-            } else {
-                JsonNode data = data(reply);
-                if ("list".equals(endpoint)) {
-                    assertThat(data.size()).isEqualTo(3);
-                    data.forEach(this::assertPrivateProxyUrls);
-                } else {
-                    assertPrivateProxyUrls(data);
-                }
-                verify(storage, never()).read(anyString(), anyString());
-            }
-        } else {
-            assertDenied(reply, actor);
-            verifyNoInteractions(storage);
-        }
+        assertDenied(reply, actor);
+        verifyNoInteractions(storage);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "admin"})
+    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "operator", "admin"})
     void contractUploadChecksTheParentBeforeWritingStorageOrRows(String actor) throws Exception {
         long before = fileCount(fixture.contractId());
         Multipart multipart = uploadBody(fixture.contractId());
         Reply reply = request("POST", "/files", token(actor), multipart.body(), multipart.contentType());
-        if (List.of("owner", "admin").contains(actor)) {
+        if (List.of("owner", "operator").contains(actor)) {
             JsonNode uploaded = data(reply).path("files");
             assertThat(uploaded.size()).isEqualTo(1);
             assertPrivateProxyUrls(uploaded.get(0));
@@ -258,11 +244,11 @@ class ContractFileAccessIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "admin"})
+    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "operator", "admin"})
     void contractParentDeletionRequiresOwnershipBeforeChangingRows(String actor) throws Exception {
         Reply reply = request("DELETE", "/files?fileParentType=contract&fileParentId=" + fixture.contractId(),
                 token(actor), json.writeValueAsBytes(List.of(fixture.signatureId())), "application/json");
-        if (List.of("owner", "admin").contains(actor)) {
+        if (List.of("owner", "operator").contains(actor)) {
             assertThat(reply.status()).isEqualTo(200);
             assertThat(deleted(fixture.signatureId())).isEqualTo("Y");
         } else {
@@ -274,24 +260,18 @@ class ContractFileAccessIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "admin"})
-    void administratorBulkDeletionRequiresAnAdministratorForEveryFileType(String actor) throws Exception {
+    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "operator", "admin"})
+    void legacyAdministratorBulkDeletionIsClosedForAllActors(String actor) throws Exception {
         Reply reply = request("DELETE", "/files/admin", token(actor),
                 json.writeValueAsBytes(List.of(fixture.documentId(), fixture.roomFileId())), "application/json");
-        if ("admin".equals(actor)) {
-            assertThat(reply.status()).isEqualTo(200);
-            assertThat(deleted(fixture.documentId())).isEqualTo("Y");
-            assertThat(deleted(fixture.roomFileId())).isEqualTo("Y");
-        } else {
-            assertDenied(reply, actor);
-            assertThat(deleted(fixture.documentId())).isEqualTo("N");
-            assertThat(deleted(fixture.roomFileId())).isEqualTo("N");
-        }
+        assertDenied(reply, actor);
+        assertThat(deleted(fixture.documentId())).isEqualTo("N");
+        assertThat(deleted(fixture.roomFileId())).isEqualTo("N");
         verifyNoInteractions(storage);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "admin"})
+    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "operator", "admin"})
     void rawStaticContractPathsNeverBypassTheAuthorizedFileProxy(String actor) throws Exception {
         for (String prefix : List.of("CONTRACT", "contract", "CoNtRaCt", "%43ONTRACT")) {
             Reply reply = request("GET", "/static-files/" + prefix + "/" + fixture.contractId()
@@ -312,10 +292,10 @@ class ContractFileAccessIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "admin"})
+    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "operator", "admin"})
     void internalBulkMetadataHonorsEveryContractInTheRequestedMap(String actor) {
         withActor(actor, () -> {
-            if ("admin".equals(actor)) {
+            if ("operator".equals(actor)) {
                 Map<Integer, List<FileResponse>> result = service.getActiveFilesMap(" contract ",
                         List.of(fixture.contractId(), fixture.otherContractId()));
                 assertThat(result.keySet()).containsExactlyInAnyOrder(fixture.contractId(), fixture.otherContractId());
@@ -372,7 +352,7 @@ class ContractFileAccessIntegrationTest {
     @Test
     void publicRoomMetadataListAndImageBytesRemainPublic() throws Exception {
         JsonNode meta = data(request("GET", "/files/" + fixture.roomFileId(), null, null, null));
-        assertThat(meta.path("viewUrl").asText().startsWith("https://synthetic-storage.example/ROOM/")).isTrue();
+        assertThat(meta.path("viewUrl").asText()).isEqualTo("/files/" + fixture.roomFileId() + "/view");
         JsonNode listed = data(request("GET", "/files?fileParentType=ROOM&fileParentId=" + fixture.roomId(),
                 null, null, null));
         assertThat(listed.size()).isEqualTo(1);
@@ -388,12 +368,14 @@ class ContractFileAccessIntegrationTest {
         Files.write(publicStatic, PUBLIC_PNG);
         Reply staticImage = request("GET", "/static-files/ROOM/" + fixture.roomId()
                 + "/synthetic-public-room.png", token("guest"), null, null);
-        assertThat(staticImage.status()).isEqualTo(200);
-        assertThat(Arrays.equals(staticImage.body(), PUBLIC_PNG)).isTrue();
+        assertThat(staticImage.status()).isBetween(400, 499);
+        assertThat(Arrays.equals(staticImage.body(), PUBLIC_PNG)).isFalse();
+        verify(storage, never()).resolveViewUrl(anyInt(), anyString(), anyString());
+        verify(storage, never()).resolveDownloadUrl(anyInt(), anyString(), anyString());
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"owner", "admin"})
+    @ValueSource(strings = {"owner", "operator", "admin"})
     void ordinaryRoutesStillHideDeletedContractFiles(String actor) throws Exception {
         Reply reply = request("GET", "/files/" + fixture.deletedId() + "/view", token(actor), null, null);
         assertError(reply, ErrorCode.FILE_NOT_FOUND);
@@ -429,9 +411,9 @@ class ContractFileAccessIntegrationTest {
     }
 
     @Test
-    void administratorDemotionRevokesTheOldTokensContractFileAccessOnTheNextRequest() throws Exception {
-        String oldAdmin = token("admin");
-        jdbc.update("UPDATE users SET user_role='user' WHERE user_id=?", fixture.adminId());
+    void ownerRevocationRevokesTheOldTokensContractFileAccessOnTheNextRequest() throws Exception {
+        String oldAdmin = token("operator");
+        jdbc.update("UPDATE account_role_grants SET grant_state='REVOKED' WHERE user_id=? AND role_code='OWNER'", fixture.operatorId());
         assertError(request("GET", "/files/" + fixture.documentId() + "/view", oldAdmin, null, null), ErrorCode.FORBIDDEN);
         assertError(request("GET", "/files/admin/" + fixture.deletedId() + "/view", oldAdmin, null, null), ErrorCode.FORBIDDEN);
         verifyNoInteractions(storage);
@@ -554,6 +536,7 @@ class ContractFileAccessIntegrationTest {
             case "owner" -> jwt.createAccessToken(fixture.ownerId(), "tenant");
             case "other" -> jwt.createAccessToken(fixture.otherId(), "user");
             case "admin" -> jwt.createAccessToken(fixture.adminId(), "admin");
+            case "operator" -> jwt.createAccessToken(fixture.operatorId(), "owner");
             default -> throw new IllegalArgumentException("Unknown synthetic actor");
         };
     }
@@ -591,16 +574,16 @@ class ContractFileAccessIntegrationTest {
         assertThat(id).isPositive();
         assertThat(file.path("viewUrl").asText()).isEqualTo("/files/" + id + "/view");
         assertThat(file.path("downloadUrl").asText()).isEqualTo("/files/" + id + "/download");
-        assertThat(file.path("adminViewUrl").asText()).isEqualTo("/files/admin/" + id + "/view");
-        assertThat(file.path("adminDownloadUrl").asText()).isEqualTo("/files/admin/" + id + "/download");
+        assertThat(file.path("adminViewUrl").asText()).isEqualTo("/files/" + id + "/view");
+        assertThat(file.path("adminDownloadUrl").asText()).isEqualTo("/files/" + id + "/download");
     }
 
     private void assertPrivateProxyUrls(FileResponse file) {
         int id = file.getFileId();
         assertThat(file.getViewUrl()).isEqualTo("/files/" + id + "/view");
         assertThat(file.getDownloadUrl()).isEqualTo("/files/" + id + "/download");
-        assertThat(file.getAdminViewUrl()).isEqualTo("/files/admin/" + id + "/view");
-        assertThat(file.getAdminDownloadUrl()).isEqualTo("/files/admin/" + id + "/download");
+        assertThat(file.getAdminViewUrl()).isEqualTo("/files/" + id + "/view");
+        assertThat(file.getAdminDownloadUrl()).isEqualTo("/files/" + id + "/download");
     }
 
     private void assertDenied(Reply reply, String actor) throws Exception {
@@ -753,7 +736,7 @@ class ContractFileAccessIntegrationTest {
 
     private record Fixture(String ownerId, String otherId, String adminId, int contractId, int otherContractId,
             int roomId, int documentId, int signatureId, int deletedId, int otherDocumentId, int roomFileId,
-            int orphanId, String documentPath, String documentName) {}
+            int orphanId, String documentPath, String documentName, String operatorId) {}
     private record Multipart(byte[] body, String contentType) {}
     private record Reply(int status, byte[] body, Map<String, List<String>> headers) {
         String header(String name) {

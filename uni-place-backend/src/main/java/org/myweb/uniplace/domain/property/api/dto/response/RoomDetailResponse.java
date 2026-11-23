@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.property.api.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -20,7 +22,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
+@Builder(toBuilder = true)
 public class RoomDetailResponse {
 
     private Integer roomId;
@@ -32,9 +34,13 @@ public class RoomDetailResponse {
     private Integer parkingCapacity;
 
     // ✅ 임대인 정보 (Building에서 자동 포함)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String buildingLessorNm;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String buildingLessorTel;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String buildingLessorAddr;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String buildingLessorRrn;
 
     private Integer roomNo;
@@ -59,6 +65,39 @@ public class RoomDetailResponse {
     private String roomDesc;
 
     private List<FileResponse> files;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String ownershipStatus;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean publicVisible;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean verifiedRentalOwner;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean buildingManagementAllowed;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean canReassignBuilding;
+
+    public RoomDetailResponse withBuildingManagement(boolean allowed) {
+        return toBuilder().buildingManagementAllowed(allowed).canReassignBuilding(allowed).build();
+    }
+
+    public RoomDetailResponse withPublicVisibility(boolean visible) {
+        return toBuilder().publicVisible(visible).build();
+    }
+
+    public RoomDetailResponse withOwnershipStatus(String status) {
+        return toBuilder().ownershipStatus(status).build();
+    }
+
+    public static RoomDetailResponse fromPublicEntity(Room entity, List<FileResponse> files) {
+        return fromEntity(entity, files).toBuilder()
+                .buildingLessorNm(null).buildingLessorTel(null)
+                .buildingLessorAddr(null).buildingLessorRrn(null).build();
+    }
 
     public static RoomDetailResponse fromEntity(Room e, List<FileResponse> files) {
 

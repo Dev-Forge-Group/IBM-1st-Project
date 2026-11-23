@@ -16,7 +16,7 @@ import lombok.*;
 @Builder
 public class SpaceCreateRequest {
 
-    @NotBlank(message = "buildingNm은 필수입니다.")
+    private Integer buildingId;
     private String buildingNm;
 
     @NotBlank(message = "spaceNm은 필수입니다.")

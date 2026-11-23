@@ -5,6 +5,7 @@ import {
   AUTH_SESSION_EXPIRED_EVENT,
 } from '../../../app/auth/authResume';
 import { AuthProvider, useAuth } from './useAuth';
+import { accountRoles } from '../../../shared/auth/accountAccess';
 
 function jsonResponse(status, data) {
   return {
@@ -91,5 +92,22 @@ describe('AuthProvider session restoration', () => {
     expect(result.current.user).toBeNull();
     expect(localStorage.getItem('access_token')).toBeNull();
     expect(localStorage.getItem('refresh_token')).toBeNull();
+  });
+
+  it('replaces current account roles after owner approval and revocation through an uncached profile refresh', async () => {
+    const member = { userId: 'synthetic-member', accountKind: 'MEMBER', userRole: 'user', roles: ['CUSTOMER'], ownerStatus: 'PENDING' };
+    const approved = { ...member, roles: ['CUSTOMER', 'OWNER'], ownerStatus: 'APPROVED' };
+    const revoked = { ...member, userRole: 'tenant', roles: [], ownerStatus: 'REJECTED' };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { success: true, data: member }))
+      .mockResolvedValueOnce(jsonResponse(200, { success: true, data: approved }))
+      .mockResolvedValueOnce(jsonResponse(200, { success: true, data: revoked }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(accountRoles(result.current.user)).toEqual(['CUSTOMER']);
+    await act(() => result.current.refresh()); expect(accountRoles(result.current.user)).toEqual(['CUSTOMER', 'OWNER']);
+    await act(() => result.current.refresh()); expect(accountRoles(result.current.user)).toEqual([]);
+    expect(fetchMock.mock.calls.every(([path, options]) => path.endsWith('/users/me') && options.cache === 'no-store')).toBe(true);
+    expect(localStorage.getItem('access_token')).toBe('old-access');
   });
 });

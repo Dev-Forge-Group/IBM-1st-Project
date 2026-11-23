@@ -13,8 +13,10 @@ import org.springframework.data.domain.Pageable;
 public interface SpaceService {
 
     SpaceDetailResponse getSpace(Integer spaceId);
+    SpaceDetailResponse getSpaceForOwner(Integer spaceId);
 
     Page<SpaceResponse> searchPage(SpaceSearchRequest request, Pageable pageable);
+    Page<SpaceResponse> searchOwnedPage(SpaceSearchRequest request, Pageable pageable);
 
     SpaceDetailResponse createSpace(SpaceCreateRequest request);
 

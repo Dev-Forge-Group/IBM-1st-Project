@@ -1,12 +1,13 @@
 import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useRef } from 'react';
-import { adminApi } from '../../api/adminApi';
+import { ownerApi as adminApi } from '../../../owner/api/ownerApi';
 import useBuildingOptions from '../../hooks/useBuildingOptions';
 import FileUploader from '../../../file/components/FileUploader';
 import useFileUpload from '../../../file/hooks/useFileUpload';
 import styles from './AdminCreateModal.module.css';
 
 const EMPTY = {
+  buildingId: '',
   buildingNm: '',
   spaceNm: '',
   spaceFloor: '',
@@ -17,7 +18,7 @@ const EMPTY = {
 
 export default function AdminSpaceModal({ spaceId, onClose, onSuccess }) {
   const isEdit = !!spaceId;
-  const { buildings, loading: bldgLoading } = useBuildingOptions();
+  const { buildings, loading: bldgLoading } = useBuildingOptions(adminApi);
   const [form, setForm] = useState(EMPTY);
   const [existingFiles, setExistingFiles] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -39,6 +40,7 @@ export default function AdminSpaceModal({ spaceId, onClose, onSuccess }) {
       .getSpaceDetail(spaceId)
       .then((data) => {
         setForm({
+          buildingId: String(data.buildingId ?? ''),
           buildingNm: data.buildingNm || '',
           spaceNm: data.spaceNm || '',
           spaceFloor: data.spaceFloor ?? '',
@@ -53,8 +55,13 @@ export default function AdminSpaceModal({ spaceId, onClose, onSuccess }) {
       .finally(() => setFetchLoading(false));
   }, [isEdit, spaceId]);
 
-  const handleChange = (e) =>
-    setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    if (name === 'buildingId') {
+      const building = buildings.find((item) => String(item.buildingId) === value);
+      setForm((previous) => ({ ...previous, buildingId: value, buildingNm: building?.buildingNm || '' }));
+    } else setForm((previous) => ({ ...previous, [name]: value }));
+  };
 
   const handleSubmit = async () => {
     if (!form.buildingNm) {
@@ -74,6 +81,7 @@ export default function AdminSpaceModal({ spaceId, onClose, onSuccess }) {
     try {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => {
+        if (k === 'buildingNm') return;
         if (v !== '') fd.append(k, v);
       });
       fu.newFiles.forEach((f) => fd.append('files', f));
@@ -140,8 +148,8 @@ export default function AdminSpaceModal({ spaceId, onClose, onSuccess }) {
                   </span>
                   <select
                     className={styles.select}
-                    name="buildingNm"
-                    value={form.buildingNm}
+                    name="buildingId"
+                    value={form.buildingId}
                     onChange={handleChange}
                     disabled={bldgLoading}
                   >
@@ -149,7 +157,7 @@ export default function AdminSpaceModal({ spaceId, onClose, onSuccess }) {
                       {bldgLoading ? '불러오는 중...' : '건물을 선택하세요'}
                     </option>
                     {buildings.map((b) => (
-                      <option key={b.buildingId} value={b.buildingNm}>
+                      <option key={b.buildingId} value={String(b.buildingId)}>
                         [{b.buildingId}] {b.buildingNm} — {b.buildingAddr}
                       </option>
                     ))}
@@ -214,6 +222,7 @@ export default function AdminSpaceModal({ spaceId, onClose, onSuccess }) {
             <div className={styles.section}>
               <h3 className={styles.sectionTitle}>이미지</h3>
               <FileUploader
+                authenticatedExisting
                 existingFiles={existingFiles}
                 newFiles={fu.newFiles}
                 previews={fu.previews}

@@ -19,6 +19,7 @@ public interface BuildingService {
 
     // 일반 사용자: 삭제된 건물 제외 목록 (전체)
     Page<BuildingSummaryResponse> searchPage(Pageable pageable);
+    Page<BuildingSummaryResponse> searchOwnedPage(Pageable pageable);
 
     // AI 챗봇용: 필터 조건 지원 (엘리베이터, 주차, 키워드)
     Page<BuildingSummaryResponse> searchPageWithFilters(

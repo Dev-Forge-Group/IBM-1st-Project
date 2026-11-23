@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.myweb.uniplace.domain.ai.application.moderation.BannedWordService;
+import org.myweb.uniplace.domain.ownership.application.OwnershipAccessService;
 import org.myweb.uniplace.domain.contract.domain.entity.Contract;
 import org.myweb.uniplace.domain.contract.domain.enums.ContractStatus;
 import org.myweb.uniplace.domain.contract.repository.ContractRepository;
@@ -49,7 +50,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /** Real contract predicates and caller transaction visibility through the public review creation path. */
 @DataJpaTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({ReviewServiceImpl.class, ReviewContractHistoryAdapter.class})
+@Import({OwnershipAccessService.class, ReviewServiceImpl.class, ReviewContractHistoryAdapter.class})
 @Testcontainers
 class ReviewContractHistoryIntegrationTest {
     @Container

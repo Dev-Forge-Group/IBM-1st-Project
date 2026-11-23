@@ -1,5 +1,7 @@
 package org.myweb.uniplace.global.security;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -127,30 +129,36 @@ class JwtAuthorityIntegrationTest {
     void adminDemotionRevokesTheExistingAccessTokenOnTheNextRequest(UserRole target) throws Exception {
         String id = member(UserRole.admin);
         String oldAccess = jwt.createAccessToken(id, "admin");
-        assertIdentity(send(get("/api/admin/_jwt-authority"), oldAccess, 200), id, "admin");
+        assertIdentity(send(get("/api/admin/users/_jwt-authority"), oldAccess, 200), id, "admin");
 
+        if (target == UserRole.tenant) {
+            assertError(patch("/api/admin/users/" + id + "/role").contentType(MediaType.APPLICATION_JSON)
+                    .content(json.writeValueAsBytes(Map.of("userRole", target.name()))), oldAccess, ErrorCode.BAD_REQUEST);
+            assertIdentity(send(get("/api/admin/users/_jwt-authority"), oldAccess, 200), id, "admin");
+            return;
+        }
         changeRole(id, target, oldAccess);
 
-        assertError(get("/api/admin/_jwt-authority"), oldAccess, ErrorCode.FORBIDDEN);
-        assertIdentity(send(get("/api/_jwt-authority"), oldAccess, 200), id, target.name());
+        assertError(get("/api/admin/users/_jwt-authority"), oldAccess, ErrorCode.FORBIDDEN);
+        assertError(get("/api/_jwt-authority"), oldAccess, ErrorCode.FORBIDDEN);
+        assertIdentity(send(get("/api/buildings/_jwt-authority"), oldAccess, 200), id, "user", List.of());
         assertThat(jwt.getRole(oldAccess)).isEqualTo("admin");
     }
 
     @ParameterizedTest
     @EnumSource(value = UserRole.class, names = {"admin", "tenant"})
-    void promotionIsVisibleToAnExistingUserTokenWithoutForcingARefresh(UserRole target) throws Exception {
+    void aGenericRolePatchCannotConvertMembersToStaffOrGrantTenantAuthority(UserRole target) throws Exception {
         String id = member(UserRole.user);
         String oldAccess = jwt.createAccessToken(id, "user");
         String admin = member(UserRole.admin);
         MockHttpServletRequestBuilder before = target == UserRole.admin
-                ? get("/api/admin/_jwt-authority") : put("/api/complains/_jwt-authority");
+                ? get("/api/admin/users/_jwt-authority") : put("/api/complains/_jwt-authority");
         assertError(before, oldAccess, ErrorCode.FORBIDDEN);
 
-        changeRole(id, target, jwt.createAccessToken(admin, "admin"));
-
-        MockHttpServletRequestBuilder after = target == UserRole.admin
-                ? get("/api/admin/_jwt-authority") : put("/api/complains/_jwt-authority");
-        assertIdentity(send(after, oldAccess, 200), id, target.name());
+        assertError(patch("/api/admin/users/" + id + "/role").contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsBytes(Map.of("userRole", target.name()))),
+                jwt.createAccessToken(admin, "admin"), ErrorCode.BAD_REQUEST);
+        assertIdentity(send(get("/api/_jwt-authority"), oldAccess, 200), id, "user");
         assertThat(jwt.getRole(oldAccess)).isEqualTo("user");
     }
 
@@ -164,7 +172,7 @@ class JwtAuthorityIntegrationTest {
 
         contracts.updateContractForAdmin(contract, ContractUpdateRequest.builder().contractStatus(target).build());
 
-        assertThat(jdbc.queryForObject("SELECT user_role FROM users WHERE user_id=?", String.class, id)).isEqualTo("user");
+        assertThat(jdbc.queryForObject("SELECT user_role FROM users WHERE user_id=?", String.class, id)).isEqualTo("tenant");
         assertThat(jdbc.queryForObject("SELECT contract_st FROM contract WHERE contract_id=?", String.class, contract))
                 .isEqualTo(target.name());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM residents WHERE contract_id=?", Integer.class, contract)).isZero();
@@ -178,15 +186,16 @@ class JwtAuthorityIntegrationTest {
         String id = member(UserRole.admin);
         String access = jwt.createAccessToken(id, "admin");
         makeUnavailable(id, state);
-        assertError(get("/api/admin/_jwt-authority"), access, ErrorCode.UNAUTHORIZED);
+        assertError(get("/api/admin/users/_jwt-authority"), access, ErrorCode.UNAUTHORIZED);
     }
 
     @Test
     void aGuestNeedsNoMemberRowAndNeverReceivesMemberAuthority() throws Exception {
         String guest = "GUEST_" + UUID.randomUUID().toString().replace("-", "");
         String access = jwt.createAccessToken(guest, "guest");
-        assertIdentity(send(get("/api/_jwt-authority"), access, 200), guest, "guest");
-        assertError(get("/api/admin/_jwt-authority"), access, ErrorCode.FORBIDDEN);
+        assertIdentity(send(get("/api/buildings/_jwt-authority"), access, 200), guest, "guest");
+        assertError(get("/api/_jwt-authority"), access, ErrorCode.FORBIDDEN);
+        assertError(get("/api/admin/users/_jwt-authority"), access, ErrorCode.FORBIDDEN);
         assertError(put("/api/complains/_jwt-authority"), access, ErrorCode.FORBIDDEN);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE user_id=?", Integer.class, guest)).isZero();
     }
@@ -195,14 +204,15 @@ class JwtAuthorityIntegrationTest {
     void aSignedGuestRoleIsNotUpgradedWhenItsSubjectAlsoNamesAMember() throws Exception {
         String admin = member(UserRole.admin);
         String guestAccess = jwt.createAccessToken(admin, "guest");
-        assertIdentity(send(get("/api/_jwt-authority"), guestAccess, 200), admin, "guest");
-        assertError(get("/api/admin/_jwt-authority"), guestAccess, ErrorCode.FORBIDDEN);
+        assertIdentity(send(get("/api/buildings/_jwt-authority"), guestAccess, 200), admin, "guest");
+        assertError(get("/api/_jwt-authority"), guestAccess, ErrorCode.FORBIDDEN);
+        assertError(get("/api/admin/users/_jwt-authority"), guestAccess, ErrorCode.FORBIDDEN);
     }
 
     @Test
     void aRequestWithoutATokenDoesNotInheritThePreviousRequestPrincipal() throws Exception {
         String id = member(UserRole.admin);
-        send(get("/api/admin/_jwt-authority"), jwt.createAccessToken(id, "admin"), 200);
+        send(get("/api/admin/users/_jwt-authority"), jwt.createAccessToken(id, "admin"), 200);
         assertError(get("/api/_jwt-authority"), null, ErrorCode.UNAUTHORIZED);
     }
 
@@ -215,7 +225,7 @@ class JwtAuthorityIntegrationTest {
             case "oauth-signup" -> jwt.createOauthSignupToken("test", "synthetic-provider", "fixture@example.test", "fixture");
             default -> jwt.createOauthLinkToken(id, "test");
         };
-        assertError(get("/api/admin/_jwt-authority"), token, ErrorCode.TOKEN_TYPE_INVALID);
+        assertError(get("/api/admin/users/_jwt-authority"), token, ErrorCode.TOKEN_TYPE_INVALID);
     }
 
     @ParameterizedTest
@@ -232,13 +242,13 @@ class JwtAuthorityIntegrationTest {
             case "blank-role" -> " ";
             default -> "admin";
         };
-        assertError(get("/api/admin/_jwt-authority"), jwt.createAccessToken(subject, role), ErrorCode.TOKEN_INVALID);
+        assertError(get("/api/admin/users/_jwt-authority"), jwt.createAccessToken(subject, role), ErrorCode.TOKEN_INVALID);
     }
 
     @Test
     void anExpiredAccessTokenCannotBorrowTheDatabaseRole() throws Exception {
         String id = member(UserRole.admin);
-        assertError(get("/api/admin/_jwt-authority"), jwt.createAccessToken(id, "admin", -60_000), ErrorCode.TOKEN_EXPIRED);
+        assertError(get("/api/admin/users/_jwt-authority"), jwt.createAccessToken(id, "admin", -60_000), ErrorCode.TOKEN_EXPIRED);
     }
 
     @Test
@@ -248,7 +258,7 @@ class JwtAuthorityIntegrationTest {
                 .expiration(new Date(System.currentTimeMillis() + 60_000))
                 .signWith(Keys.hmacShaKeyFor("different-synthetic-jwt-secret-at-least-32-bytes".getBytes(StandardCharsets.UTF_8)), Jwts.SIG.HS256)
                 .compact();
-        assertError(get("/api/admin/_jwt-authority"), token, ErrorCode.TOKEN_INVALID);
+        assertError(get("/api/admin/users/_jwt-authority"), token, ErrorCode.TOKEN_INVALID);
     }
 
     @Test
@@ -272,8 +282,9 @@ class JwtAuthorityIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT revoked FROM refresh_tokens WHERE token_hash=?", Boolean.class, hash(oldRefresh))).isTrue();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM refresh_tokens WHERE user_id=? AND revoked=false", Integer.class, id)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT device_id FROM refresh_tokens WHERE token_hash=? AND revoked=false", String.class, hash(rotated))).isEqualTo(DEVICE);
-        assertIdentity(send(get("/api/_jwt-authority"), access, 200), id, "user");
-        assertError(get("/api/admin/_jwt-authority"), access, ErrorCode.FORBIDDEN);
+        assertIdentity(send(get("/api/buildings/_jwt-authority"), access, 200), id, "user", List.of());
+        assertError(get("/api/_jwt-authority"), access, ErrorCode.FORBIDDEN);
+        assertError(get("/api/admin/users/_jwt-authority"), access, ErrorCode.FORBIDDEN);
     }
 
     @ParameterizedTest
@@ -299,12 +310,25 @@ class JwtAuthorityIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT revoked FROM refresh_tokens WHERE token_hash=?", Boolean.class, hash(token))).isFalse();
     }
 
+    @Test
+    void ownerApprovalAndRevocationAffectTheSameExistingConsumerToken() throws Exception {
+        String id = member(UserRole.user);
+        String access = jwt.createAccessToken(id, "user");
+        assertError(get("/api/owner/_jwt-authority"), access, ErrorCode.FORBIDDEN);
+        approveOwner(jdbc, id);
+        assertIdentity(send(get("/api/owner/_jwt-authority"), access, 200), id, "user",
+                List.of("ROLE_CUSTOMER", "ROLE_OWNER", "ROLE_USER"));
+        jdbc.update("UPDATE account_role_grants SET grant_state='REVOKED' WHERE user_id=? AND role_code='OWNER'", id);
+        assertError(get("/api/owner/_jwt-authority"), access, ErrorCode.FORBIDDEN);
+        assertIdentity(send(get("/api/_jwt-authority"), access, 200), id, "user");
+    }
+
     private String member(UserRole role) {
         String id = "jwt-" + UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO users (user_id,user_nm,user_email,user_pwd,user_birth,user_tel,user_nickname,user_role,user_st,delete_yn)
-                VALUES (?, 'JWT fixture', ?, 'synthetic-test-hash', '2000-01-01', '010-0000-0000', ?, ?, 'active', 'N')
-                """, id, id + "@example.test", id, role.name());
+                INSERT INTO users (user_id,user_nm,user_email,user_pwd,user_birth,user_tel,user_nickname,user_role,user_st,delete_yn,account_kind)
+                VALUES (?, 'JWT fixture', ?, 'synthetic-test-hash', '2000-01-01', '010-0000-0000', ?, ?, 'active', 'N', ?)
+                """, id, id + "@example.test", id, role.name(), role == UserRole.admin ? "STAFF" : "MEMBER");
         return id;
     }
 
@@ -378,7 +402,19 @@ class JwtAuthorityIntegrationTest {
     private void assertIdentity(JsonNode response, String id, String role) {
         assertThat(response.path("userId").asText()).isEqualTo(id);
         assertThat(response.path("role").asText()).isEqualTo(role);
-        assertThat(response.path("authorities")).isEqualTo(json.valueToTree(List.of("ROLE_" + role.toUpperCase(java.util.Locale.ROOT))));
+        List<String> expected = switch (role) {
+            case "admin" -> List.of("ROLE_ADMIN");
+            case "guest" -> List.of("ROLE_GUEST");
+            case "tenant" -> List.of("ROLE_CUSTOMER", "ROLE_TENANT", "ROLE_USER");
+            default -> List.of("ROLE_CUSTOMER", "ROLE_USER");
+        };
+        assertIdentity(response, id, role, expected);
+    }
+
+    private void assertIdentity(JsonNode response, String id, String role, List<String> authorities) {
+        assertThat(response.path("userId").asText()).isEqualTo(id);
+        assertThat(response.path("role").asText()).isEqualTo(role);
+        assertThat(response.path("authorities")).isEqualTo(json.valueToTree(authorities));
         assertThat(response.path("principalAuthorities")).isEqualTo(response.path("authorities"));
     }
 
@@ -386,7 +422,7 @@ class JwtAuthorityIntegrationTest {
     @RestController
     @Profile("jwt-authority-test")
     static class AuthorityProbe {
-        @GetMapping({"/_jwt-authority", "/admin/_jwt-authority"})
+        @GetMapping({"/_jwt-authority", "/admin/users/_jwt-authority", "/owner/_jwt-authority", "/buildings/_jwt-authority"})
         Map<String, Object> getAuthority(Authentication authentication) {
             return identity(authentication);
         }

@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.reservation.api;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -95,7 +97,7 @@ class TourHttpJourneyIntegrationTest {
     @AfterAll
     static void optionalBrowserJourney(
             @Autowired BuildingRepository buildings, @Autowired RoomRepository rooms,
-            @Autowired PlatformTransactionManager transactions, @Autowired ObjectMapper json,
+            @Autowired PlatformTransactionManager transactions, @Autowired ObjectMapper json, @Autowired JdbcTemplate jdbc,
             @LocalServerPort int port) throws Exception {
         String target = System.getenv("UNIPLACE_TOUR_BROWSER_READY");
         if (target == null || target.isBlank()) return;
@@ -105,6 +107,7 @@ class TourHttpJourneyIntegrationTest {
             Room room = rooms.saveAndFlush(Room.builder().building(building).roomNo(701).floor(1)
                     .roomSize(new BigDecimal("20.00")).rentPrice(new BigDecimal("500000"))
                     .roomSt(RoomStatus.available).build());
+            rentalOperator(jdbc, "http-browser-owner-" + building.getBuildingId(), building.getBuildingId());
             return Map.of("baseUrl", "http://127.0.0.1:" + port + "/api",
                     "buildingId", building.getBuildingId(), "buildingNm", building.getBuildingNm(),
                     "roomId", room.getRoomId(), "roomNo", room.getRoomNo(), "date", "2100-03-12");
@@ -140,14 +143,22 @@ class TourHttpJourneyIntegrationTest {
                         .userBirth(LocalDate.of(2000, 1, 1)).userTel("010-0000-0000")
                         .userNickname(prefix + "-" + role.name()).userRole(role).build());
             }
+            rentalOperator(jdbc, prefix + "-owner", building.getBuildingId());
             return new Fixture(building.getBuildingId(), first.getRoomId(), second.getRoomId(), prefix);
         });
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"anonymous", "guest", "user", "tenant", "admin"})
+    @ValueSource(strings = {"anonymous", "guest", "user", "tenant", "owner", "admin"})
     void publicActorsDiscoverBookFindAndCancelWithTheSameTelephoneCredentials(String actor) throws Exception {
         String token = token(actor);
+        if ("admin".equals(actor)) {
+            JsonNode slot = discoverSlot(token);
+            assertError(request("POST", "/tour-reservations", token, booking(fixture.roomId(), slot, phone(1))), ErrorCode.FORBIDDEN);
+            assertError(request("POST", "/tour-reservations/lookup", token, credentials(phone(1), PIN)), ErrorCode.FORBIDDEN);
+            assertThat(tourCount()).isZero();
+            return;
+        }
         JsonNode slot = discoverSlot(token);
         String originalPhone = hyphens(phone(1));
         JsonNode created = create(fixture.roomId(), slot, originalPhone, token);
@@ -176,7 +187,7 @@ class TourHttpJourneyIntegrationTest {
     }
 
     @Test
-    void anEntireCommittedJourneyPreservesConflictsHistoryAndAdministratorRestoration() throws Exception {
+    void anEntireCommittedJourneyPreservesConflictsHistoryAndOwnerRestoration() throws Exception {
         JsonNode slot = discoverSlot(null);
         JsonNode created = create(fixture.roomId(), slot, phone(1), null);
         int old = created.path("tourId").asInt();
@@ -188,7 +199,7 @@ class TourHttpJourneyIntegrationTest {
 
         data(request("PUT", "/tour-reservations/cancel/" + old, null, credentials(phone(1), PIN)));
         int replacement = create(fixture.roomId(), slot, phone(2), null).path("tourId").asInt();
-        String admin = token("admin");
+        String admin = token("owner");
         assertError(status(old, "confirmed", admin), ErrorCode.TOUR_RESERVATION_TIME_CONFLICT);
         assertThat(state(old)).isEqualTo("cancelled");
         assertThat(state(replacement)).isEqualTo("requested");
@@ -208,19 +219,19 @@ class TourHttpJourneyIntegrationTest {
         assertThat(state(old)).isEqualTo("ended");
         assertThat(tour(lookup(phone(1), null), old).path("tourSt").asText()).isEqualTo("ended");
         assertThat(tour(lookup(phone(2), null), replacement).path("tourSt").asText()).isEqualTo("cancelled");
-        assertThat(tour(data(request("GET", "/admin/tour-reservations?size=1000", admin, null)), old)
+        assertThat(tour(data(request("GET", "/owner/tour-reservations?size=1000", admin, null)), old)
                 .path("tourSt").asText()).isEqualTo("ended");
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"anonymous", "guest", "user", "tenant", "admin"})
-    void administratorListAndStatusRequireTheAdministratorRole(String actor) throws Exception {
+    @ValueSource(strings = {"anonymous", "guest", "user", "tenant", "owner", "admin"})
+    void ownerListAndStatusRequireAnApprovedScopedOwner(String actor) throws Exception {
         JsonNode slot = discoverSlot(null);
         int id = create(fixture.roomId(), slot, phone(1), null).path("tourId").asInt();
         String token = token(actor);
-        Reply list = request("GET", "/admin/tour-reservations?size=1000", token, null);
+        Reply list = request("GET", "/owner/tour-reservations?size=1000", token, null);
         Reply change = status(id, "confirmed", token);
-        if ("admin".equals(actor)) {
+        if ("owner".equals(actor)) {
             assertThat(tour(data(list), id).path("tourId").asInt()).isEqualTo(id);
             assertThat(data(change).isNull()).isTrue();
             assertThat(state(id)).isEqualTo("confirmed");
@@ -245,7 +256,7 @@ class TourHttpJourneyIntegrationTest {
             case "number" -> request("GET", "/tour-reservations/slots?buildingId=" + marker
                     + "&roomId=" + fixture.roomId() + "&date=" + DATE, null, null);
             case "missing-date" -> request("GET", path, null, null);
-            default -> status(id, marker, token("admin"));
+            default -> status(id, marker, token("owner"));
         };
         assertError(reply, ErrorCode.BAD_REQUEST);
         assertThat(reply.body()).doesNotContain(marker, "Exception", "org.springframework", "java.time");
@@ -303,7 +314,7 @@ class TourHttpJourneyIntegrationTest {
     }
 
     private Reply status(int id, String status, String token) throws Exception {
-        return request("PUT", "/admin/tour-reservations/status/" + id + "?status=" + status, token, null);
+        return request("PUT", "/owner/tour-reservations/status/" + id + "?status=" + status, token, null);
     }
 
     private Reply request(String method, String path, String token, Object payload) throws Exception {

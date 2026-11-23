@@ -17,6 +17,7 @@ public class ContractAdminSearchRequest {
     private String keyword;
 
     // 개별 필터(선택)
+    private Integer contractId;
     private ContractStatus contractStatus;
 
     private Integer buildingId;

@@ -15,7 +15,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface SpaceReservationRepository extends JpaRepository<SpaceReservationEntity, Integer> {
+public interface SpaceReservationRepository extends JpaRepository<SpaceReservationEntity, Integer>, JpaSpecificationExecutor<SpaceReservationEntity> {
 
     @Query("""
         select count(s) > 0

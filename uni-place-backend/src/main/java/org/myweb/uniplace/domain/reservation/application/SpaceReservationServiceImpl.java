@@ -3,6 +3,7 @@ package org.myweb.uniplace.domain.reservation.application;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 
 import org.myweb.uniplace.domain.property.api.dto.request.SpaceSearchRequest;
@@ -13,6 +14,7 @@ import org.myweb.uniplace.domain.property.domain.entity.CommonSpace;
 import org.myweb.uniplace.domain.property.repository.BuildingRepository;
 import org.myweb.uniplace.domain.property.repository.SpaceRepository;
 import org.myweb.uniplace.domain.contract.repository.ContractRepository;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 
 import org.myweb.uniplace.domain.reservation.api.dto.request.CancelSpaceReservationRequest;
 import org.myweb.uniplace.domain.reservation.api.dto.request.CreateSpaceReservationRequest;
@@ -27,7 +29,6 @@ import org.myweb.uniplace.domain.contract.domain.enums.ContractStatus;
 import org.myweb.uniplace.domain.reservation.repository.SpaceReservationRepository;
 
 import org.myweb.uniplace.domain.user.domain.entity.User;
-import org.myweb.uniplace.domain.user.domain.enums.UserRole;
 import org.myweb.uniplace.domain.user.domain.enums.UserStatus;
 import org.myweb.uniplace.domain.user.repository.UserRepository;
 
@@ -57,6 +58,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
     private final BuildingRepository buildingRepository;
     private final SpaceRepository spaceRepository;
     private final ContractRepository contractRepository;
+    private final OwnershipAccess ownership;
 
     private final SpaceService spaceService;
     private final UserRepository userRepository;
@@ -90,6 +92,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         if (reservableBuilding.isDeleted()) {
             throw new BusinessException(ErrorCode.BUILDING_NOT_FOUND);
         }
+        ownership.requirePublicBuilding(buildingId);
 
         SpaceSearchRequest request = SpaceSearchRequest.builder()
                 .buildingId(buildingId)
@@ -141,15 +144,14 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
     @Override
     public SpaceReservationResponse create(AuthUser me, CreateSpaceReservationRequest request) {
 
-        if (me == null || me.getUserId() == null) {
-            throw new BusinessException(ErrorCode.UNAUTHORIZED);
-        }
+        requireMember(me);
+        if (request == null) throw new BusinessException(ErrorCode.BAD_REQUEST);
 
         User user = userRepository.findById(me.getUserId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         // ✅ tenant만 예약 가능
-        if (user.getUserRole() != UserRole.tenant) {
+        if (!ownership.effectiveAccess(me.getUserId()).roles().contains("TENANT")) {
             throw new BusinessException(ErrorCode.SPACE_RESERVATION_TENANT_ONLY);
         }
         if (user.getUserSt() != UserStatus.active || "Y".equalsIgnoreCase(user.getDeleteYN())) {
@@ -157,15 +159,11 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         }
 
         // ✅ 같은 건물에 active 계약이 있는 입주자만 예약 가능
-        boolean hasActiveContract = contractRepository.existsActiveContractByUserAndBuilding(
-                me.getUserId(), request.getBuildingId(), ContractStatus.active
+        boolean hasActiveContract = contractRepository.existsActiveResidentContractByUserAndBuilding(
+                me.getUserId(), request.getBuildingId(), ContractStatus.active, LocalDate.now(ZoneId.of("Asia/Seoul"))
         );
         if (!hasActiveContract) {
             throw new BusinessException(ErrorCode.SPACE_RESERVATION_BUILDING_MISMATCH);
-        }
-
-        if (request == null) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST);
         }
 
         reservationValidator.validateSpaceTime(request.getSrStartAt(), request.getSrEndAt());
@@ -182,6 +180,8 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         if (building.isDeleted()) {
             throw new BusinessException(ErrorCode.BUILDING_NOT_FOUND);
         }
+        ownership.requirePublicBuilding(building.getBuildingId());
+        ownership.requireVerifiedRentalBuilding(building.getBuildingId());
 
         CommonSpace space = spaceRepository.findById(request.getSpaceId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.SPACE_NOT_FOUND));
@@ -235,7 +235,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         );
 
         // 2) 관리자 알림
-        notificationService.notifyAdmins(
+        notifyOwners(building.getBuildingId(),
                 NotificationType.SP_REQ.name(),
                 "공간 예약 요청이 생성되었습니다. userId=" + user.getUserId()
                         + ", buildingId=" + building.getBuildingId()
@@ -244,7 +244,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
                 user.getUserId(),
                 TargetType.space,
                 saved.getReservationId(),
-                "/admin/space-reservations"
+                "/owner/reservations/spaces"
         );
         
         slackNotificationService.sendSpaceReservationAlert(
@@ -264,9 +264,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
     @Override
     public SpaceReservationResponse cancel(AuthUser me, Integer reservationId) {
 
-        if (me == null || me.getUserId() == null) {
-            throw new BusinessException(ErrorCode.UNAUTHORIZED);
-        }
+        requireMember(me);
         if (reservationId == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST);
         }
@@ -302,7 +300,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         );
 
         // 2) 관리자 알림
-        notificationService.notifyAdmins(
+        notifyOwners(e.getBuilding().getBuildingId(),
                 NotificationType.SP_CAN.name(),
                 "사용자가 공간 예약을 취소했습니다. userId=" + e.getUser().getUserId()
                         + ", reservationId=" + e.getReservationId()
@@ -310,7 +308,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
                 e.getUser().getUserId(),
                 TargetType.space,
                 e.getReservationId(),
-                "/admin/space-reservations"
+                "/owner/reservations/spaces"
         );
 
         return SpaceReservationResponse.fromEntity(e);
@@ -324,9 +322,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
     @Transactional(readOnly = true)
     public Page<SpaceReservationResponse> myReservations(AuthUser me, Pageable pageable) {
 
-        if (me == null || me.getUserId() == null) {
-            throw new BusinessException(ErrorCode.UNAUTHORIZED);
-        }
+        requireMember(me);
 
         Page<SpaceReservationEntity> page = spaceReservationRepository.findByUser_UserId(
                 me.getUserId(),
@@ -350,7 +346,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
             LocalDate date,
             Pageable pageable
     ) {
-        requireAdmin(me);
+        requireOwner(me);
 
         LocalDateTime dayStart = null;
         LocalDateTime dayEnd = null;
@@ -359,14 +355,19 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
             dayEnd = date.plusDays(1).atStartOfDay();
         }
 
-        Page<SpaceReservationEntity> page = spaceReservationRepository.adminSearch(
-                buildingId,
-                spaceId,
-                userId,
-                dayStart,
-                dayEnd,
-                pageable
-        );
+        var buildingIds = ownership.manageableBuildingIds();
+        if (buildingIds.isEmpty()) return Page.empty(pageable);
+        final LocalDateTime from = dayStart;
+        final LocalDateTime to = dayEnd;
+        Page<SpaceReservationEntity> page = spaceReservationRepository.findAll((root, query, cb) -> {
+            List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
+            predicates.add(root.get("building").get("buildingId").in(buildingIds));
+            if (buildingId != null) predicates.add(cb.equal(root.get("building").get("buildingId"), buildingId));
+            if (spaceId != null) predicates.add(cb.equal(root.get("space").get("spaceId"), spaceId));
+            if (userId != null && !userId.isBlank()) predicates.add(cb.equal(root.get("user").get("userId"), userId));
+            if (from != null) predicates.add(cb.and(cb.lessThan(root.get("srStartAt"), to), cb.greaterThan(root.get("srEndAt"), from)));
+            return cb.and(predicates.toArray(jakarta.persistence.criteria.Predicate[]::new));
+        }, pageable);
 
         return page.map(SpaceReservationResponse::fromEntity);
     }
@@ -374,22 +375,24 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
     @Override
     @Transactional(readOnly = true)
     public SpaceReservationResponse adminDetail(AuthUser me, Integer reservationId) {
-        requireAdmin(me);
+        requireOwner(me);
         if (reservationId == null) throw new BusinessException(ErrorCode.BAD_REQUEST);
 
         SpaceReservationEntity e = spaceReservationRepository.findById(reservationId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SPACE_RESERVATION_NOT_FOUND));
+        ownership.requireCanManageBuilding(e.getBuilding().getBuildingId());
 
         return SpaceReservationResponse.fromEntity(e);
     }
 
     @Override
     public SpaceReservationResponse adminConfirm(AuthUser me, Integer reservationId) {
-        requireAdmin(me);
+        requireOwner(me);
         if (reservationId == null) throw new BusinessException(ErrorCode.BAD_REQUEST);
 
         SpaceReservationEntity e = spaceReservationRepository.findById(reservationId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SPACE_RESERVATION_NOT_FOUND));
+        ownership.requireCanManageBuilding(e.getBuilding().getBuildingId());
 
         if (e.getSrSt() == SpaceReservationStatus.confirmed) {
             return SpaceReservationResponse.fromEntity(e);
@@ -421,11 +424,12 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
 
     @Override
     public SpaceReservationResponse adminEnd(AuthUser me, Integer reservationId) {
-        requireAdmin(me);
+        requireOwner(me);
         if (reservationId == null) throw new BusinessException(ErrorCode.BAD_REQUEST);
 
         SpaceReservationEntity e = spaceReservationRepository.findById(reservationId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SPACE_RESERVATION_NOT_FOUND));
+        ownership.requireCanManageBuilding(e.getBuilding().getBuildingId());
 
         if (e.getSrSt() == SpaceReservationStatus.ended) {
             return SpaceReservationResponse.fromEntity(e);
@@ -444,11 +448,12 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
 
     @Override
     public SpaceReservationResponse adminCancel(AuthUser me, Integer reservationId, CancelSpaceReservationRequest request) {
-        requireAdmin(me);
+        requireOwner(me);
         if (reservationId == null) throw new BusinessException(ErrorCode.BAD_REQUEST);
 
         SpaceReservationEntity e = spaceReservationRepository.findById(reservationId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SPACE_RESERVATION_NOT_FOUND));
+        ownership.requireCanManageBuilding(e.getBuilding().getBuildingId());
 
         if (e.getSrSt() == SpaceReservationStatus.cancelled) {
             return SpaceReservationResponse.fromEntity(e);
@@ -471,7 +476,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         notificationService.notifyUser(
                 e.getUser().getUserId(),
                 NotificationType.SP_CAN.name(),
-                "관리자에 의해 공간 예약이 취소되었습니다. (" + timeMsg + ")" + reason,
+                "운영 소유주에 의해 공간 예약이 취소되었습니다. (" + timeMsg + ")" + reason,
                 me.getUserId(),
                 TargetType.space,
                 e.getReservationId(),
@@ -507,19 +512,22 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
         }
     }
 
-    private void requireAdmin(AuthUser me) {
+    private void requireMember(AuthUser me) {
         if (me == null || me.getUserId() == null) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED);
         }
+        if (!me.getUserId().equals(ownership.requireMember())) throw new BusinessException(ErrorCode.FORBIDDEN);
+    }
 
-        User user = userRepository.findById(me.getUserId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+    private void requireOwner(AuthUser me) {
+        requireMember(me);
+        ownership.requireOwner();
+    }
 
-        if (user.getUserRole() != UserRole.admin) {
-            throw new BusinessException(ErrorCode.SPACE_RESERVATION_TENANT_ONLY);
-        }
-        if (user.getUserSt() != UserStatus.active || "Y".equalsIgnoreCase(user.getDeleteYN())) {
-            throw new BusinessException(ErrorCode.SPACE_RESERVATION_USER_INACTIVE);
+    private void notifyOwners(Integer buildingId, String code, String message, String sender,
+                              TargetType target, Integer targetId, String url) {
+        for (String ownerId : ownership.eligibleOwnerIdsForBuilding(buildingId)) {
+            notificationService.notifyUser(ownerId, code, message, sender, target, targetId, url);
         }
     }
 

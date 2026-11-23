@@ -19,6 +19,7 @@ public interface RoomService {
     RoomDetailResponse getRoomForAdmin(Integer roomId);
 
     Page<RoomSummaryResponse> searchPage(RoomSearchRequest request, Pageable pageable);
+    Page<RoomSummaryResponse> searchOwnedPage(RoomSearchRequest request, Pageable pageable);
 
     RoomDetailResponse createRoom(RoomCreateRequest request);
     RoomDetailResponse updateRoom(Integer roomId, RoomUpdateRequest request);

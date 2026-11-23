@@ -17,6 +17,7 @@ import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.domain.property.infrastructure.RoomRecommendationAiClient;
 import org.myweb.uniplace.domain.property.repository.AiRoomRecommendationRepository;
 import org.myweb.uniplace.domain.property.repository.RoomRepository;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -54,6 +55,7 @@ public class RoomRecommendationService {
     private final RoomRepository                 roomRepository;
     private final RoomRecommendationAiClient     aiClient;
     private final FileService                    fileService;
+    private final OwnershipAccess                ownershipAccess;
 
     private static final Set<String> IMAGE_EXTS =
             Set.of(".png", ".jpg", ".jpeg", ".gif", ".webp");
@@ -64,6 +66,7 @@ public class RoomRecommendationService {
 
     /** roomId → 썸네일 URL 조회 */
     private String fetchThumbnailUrl(int roomId) {
+        if (!ownershipAccess.isPublicRoom(roomId)) return null;
         List<FileResponse> files =
                 fileService.getActiveFiles(FileRefType.ROOM.dbValue(), roomId);
         FileResponse first = files.stream()
@@ -118,8 +121,11 @@ public class RoomRecommendationService {
             return getPersonalizedTop3(userQuery.trim());
         }
 
-        // 쿼리 없으면 DB 캐시 반환 (기존 동작)
-        return recRepository.findLatestTop3().stream()
+        // Scope cached candidates before applying the Top3 limit.
+        Set<Integer> publicRoomIds = ownershipAccess.publicRoomIds();
+        if (publicRoomIds.isEmpty()) return List.of();
+        return recRepository.findLatestTop3(publicRoomIds).stream()
+                .filter(rec -> rec.getRoom() != null && ownershipAccess.isPublicRoom(rec.getRoom().getRoomId()))
                 .map(rec -> {
                     RoomRecommendationResponse resp = RoomRecommendationResponse.fromEntity(rec);
                     if (rec.getRoom() != null) {
@@ -177,6 +183,7 @@ public class RoomRecommendationService {
                     .filter(s -> toInt(s.get("room_id")) == roomId)
                     .findFirst().orElse(Map.of());
 
+            if (stat.isEmpty() || !ownershipAccess.isPublicRoom(roomId)) continue;
             Room room = roomRepository.findById(roomId).orElse(null);
             if (room == null) continue;
 
@@ -221,6 +228,7 @@ public class RoomRecommendationService {
                     .filter(s -> toInt(s.get("room_id")) == roomId)
                     .findFirst().orElse(Map.of());
 
+            if (stat.isEmpty() || !ownershipAccess.isPublicRoom(roomId)) continue;
             Room room = roomRepository.findById(roomId).orElse(null);
             if (room == null) continue;
 
@@ -244,6 +252,8 @@ public class RoomRecommendationService {
     // ──────────────────────────────────────────
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> fetchAllRoomStats() {
+        Set<Integer> publicRoomIds = ownershipAccess.publicRoomIds();
+        if (publicRoomIds.isEmpty()) return List.of();
         String sql = """
             SELECT
                 r.room_id, b.building_nm, b.building_addr,
@@ -261,6 +271,7 @@ public class RoomRecommendationService {
                                  AND c.contract_st = 'active'
             WHERE r.delete_yn = 'N'
               AND b.delete_yn = 'N'
+              AND r.room_id IN (:publicRoomIds)
               AND r.room_st   = 'available'
             GROUP BY
                 r.room_id, b.building_nm, b.building_addr,
@@ -272,7 +283,8 @@ public class RoomRecommendationService {
             LIMIT 50
             """;
 
-        List<Object[]> rows = em.createNativeQuery(sql).getResultList();
+        List<Object[]> rows = em.createNativeQuery(sql)
+                .setParameter("publicRoomIds", publicRoomIds).getResultList();
         List<Map<String, Object>> result = new ArrayList<>();
 
         for (Object[] row : rows) {
@@ -310,6 +322,8 @@ public class RoomRecommendationService {
     // ──────────────────────────────────────────
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> fetchRoomStats() {
+        Set<Integer> publicRoomIds = ownershipAccess.publicRoomIds();
+        if (publicRoomIds.isEmpty()) return List.of();
         String sql = """
             SELECT
                 r.room_id          AS room_id,
@@ -337,6 +351,7 @@ public class RoomRecommendationService {
                                  AND c.contract_st = 'active'
             WHERE r.delete_yn = 'N'
               AND b.delete_yn = 'N'
+              AND r.room_id IN (:publicRoomIds)
               AND r.room_st   = 'available'
             GROUP BY
                 r.room_id, b.building_nm, b.building_addr,
@@ -348,7 +363,8 @@ public class RoomRecommendationService {
             LIMIT 20
             """;
 
-        List<Object[]> rows = em.createNativeQuery(sql).getResultList();
+        List<Object[]> rows = em.createNativeQuery(sql)
+                .setParameter("publicRoomIds", publicRoomIds).getResultList();
         List<Map<String, Object>> result = new ArrayList<>();
 
         for (Object[] row : rows) {

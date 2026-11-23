@@ -27,9 +27,11 @@ class AiSqlRewriterTest {
     class PublicQueries {
 
         @Test
-        void keepsOpenTablesAsWritten() {
+        void scopesRoomDiscoveryToPubliclyVisibleAssetsWhilePreservingCallerConditions() {
             String sql = "SELECT r.room_no, r.rent_price FROM rooms r WHERE r.delete_yn='N' ORDER BY r.rent_price LIMIT 5";
-            assertThat(publicSql(sql)).isEqualTo(sql);
+            assertThat(publicSql(sql)).isEqualTo("SELECT r.room_no, r.rent_price FROM (SELECT * FROM rooms"
+                + " WHERE room_id IN (SELECT room_id FROM ownership_public_room_ids)) r"
+                + " WHERE r.delete_yn='N' ORDER BY r.rent_price LIMIT 5");
         }
 
         @Test
@@ -51,7 +53,7 @@ class AiSqlRewriterTest {
         void readsReservationsWithoutVisitorDetails() {
             assertThat(publicSql("SELECT tour_nm, tour_tel FROM room_reservation"))
                 .doesNotContain("tour_tel FROM room_reservation")
-                .contains("FROM room_reservation) `room_reservation`");
+                .contains("FROM room_reservation WHERE room_id IN (SELECT room_id FROM ownership_public_room_ids)) `room_reservation`");
             assertThat(publicSql("SELECT sr.sr_start_at FROM space_reservations sr"))
                 .doesNotContain("user_id").doesNotContain("sr_no_people");
         }

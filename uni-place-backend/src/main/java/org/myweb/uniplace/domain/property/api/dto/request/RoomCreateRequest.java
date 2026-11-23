@@ -10,7 +10,6 @@ import org.myweb.uniplace.domain.property.domain.enums.RoomType;
 import org.myweb.uniplace.domain.property.domain.enums.SunDirection;
 import org.springframework.web.multipart.MultipartFile;
 
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -25,7 +24,7 @@ import lombok.Setter;
 @Builder
 public class RoomCreateRequest {
 
-    @NotBlank(message = "buildingNm is required")
+    private Integer buildingId;
     private String buildingNm;
 
     @NotNull(message = "roomNo is required")

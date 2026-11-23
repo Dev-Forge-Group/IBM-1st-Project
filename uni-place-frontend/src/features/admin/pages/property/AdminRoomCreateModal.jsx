@@ -1,11 +1,13 @@
 import { createPortal } from 'react-dom';
 import React, { useState } from 'react';
-import { adminApi } from '../../api/adminApi';
+import { ownerApi as adminApi } from '../../../owner/api/ownerApi';
+import useBuildingOptions from '../../hooks/useBuildingOptions';
 import FileUploader from '../../../file/components/FileUploader';
 import useFileUpload from '../../../file/hooks/useFileUpload';
 import styles from './AdminCreateModal.module.css';
 
 const INITIAL = {
+  buildingId: '',
   buildingNm: '',
   roomNo: '',
   floor: '',
@@ -55,6 +57,7 @@ const ROOM_TYPES = [
 ];
 
 export default function AdminRoomCreateModal({ onClose, onSuccess }) {
+  const { buildings, loading: bldgLoading } = useBuildingOptions(adminApi);
   const [form, setForm] = useState(INITIAL);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -62,7 +65,10 @@ export default function AdminRoomCreateModal({ onClose, onSuccess }) {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+    if (name === 'buildingId') {
+      const building = buildings.find((item) => String(item.buildingId) === value);
+      setForm((previous) => ({ ...previous, buildingId: value, buildingNm: building?.buildingNm || '' }));
+    } else setForm((previous) => ({ ...previous, [name]: value }));
   };
 
   const handleSubmit = async () => {
@@ -92,6 +98,7 @@ export default function AdminRoomCreateModal({ onClose, onSuccess }) {
     try {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => {
+        if (k === 'buildingNm') return;
         if (v !== '') fd.append(k, v);
       });
       fu.newFiles.forEach((f) => fd.append('files', f));
@@ -123,13 +130,13 @@ export default function AdminRoomCreateModal({ onClose, onSuccess }) {
                 <span className={styles.label}>
                   건물명 <span className={styles.req}>*</span>
                 </span>
-                <input
-                  className={styles.input}
-                  name="buildingNm"
-                  value={form.buildingNm}
+                <select
+                  className={styles.select}
+                  name="buildingId"
+                  value={form.buildingId}
                   onChange={handleChange}
-                  placeholder="예: Uniplace A"
-                />
+                  disabled={bldgLoading}
+                ><option value="">건물을 선택하세요</option>{buildings.map((building) => <option key={building.buildingId} value={String(building.buildingId)}>{building.buildingNm}</option>)}</select>
               </label>
               <label className={styles.field}>
                 <span className={styles.label}>
@@ -338,6 +345,7 @@ export default function AdminRoomCreateModal({ onClose, onSuccess }) {
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>이미지 업로드</h3>
             <FileUploader
+                authenticatedExisting
               newFiles={fu.newFiles}
               previews={fu.previews}
               deleteFileIds={fu.deleteFileIds}

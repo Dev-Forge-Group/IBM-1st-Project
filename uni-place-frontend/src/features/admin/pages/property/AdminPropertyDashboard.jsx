@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import styles from './AdminPropertyDashboard.module.css';
-import { adminApi } from '../../api/adminApi';
+import { ownerApi as adminApi } from '../../../owner/api/ownerApi';
 
 export default function AdminPropertyDashboard() {
   const [buildingId, setBuildingId] = useState(1);

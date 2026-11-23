@@ -2,11 +2,13 @@
 package org.myweb.uniplace.domain.property.repository;
 
 import java.util.List;
+import java.util.Set;
 
 import org.myweb.uniplace.domain.property.domain.entity.AiRoomRecommendation;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -24,8 +26,9 @@ public interface AiRoomRecommendationRepository
                select max(a2.generatedAt)
                  from AiRoomRecommendation a2
                )
+           and a.room.roomId in :publicRoomIds
          order by a.rankNo asc
          limit 3
     """)
-    List<AiRoomRecommendation> findLatestTop3();
+    List<AiRoomRecommendation> findLatestTop3(@Param("publicRoomIds") Set<Integer> publicRoomIds);
 }

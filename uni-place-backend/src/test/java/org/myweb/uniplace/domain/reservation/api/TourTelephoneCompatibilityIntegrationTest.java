@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.reservation.api;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mockingDetails;
@@ -118,7 +120,8 @@ class TourTelephoneCompatibilityIntegrationTest {
             String admin = "telephone-admin-" + building.getBuildingId();
             users.saveAndFlush(User.builder().userId(admin).userNm(admin).userEmail(admin + "@example.test")
                     .userPwd("test-only-hash").userBirth(LocalDate.of(2000, 1, 1)).userTel("010-0000-0000")
-                    .userNickname(admin).userRole(UserRole.admin).build());
+                    .userNickname(admin).userRole(UserRole.user).build());
+            buildingOwner(jdbc, admin, building.getBuildingId());
             return new Fixture(building.getBuildingId(), first.getRoomId(), second.getRoomId(), admin);
         });
         clearInvocations(notifications, slack, aiGateway);
@@ -175,9 +178,9 @@ class TourTelephoneCompatibilityIntegrationTest {
         int old = legacy(hyphens(digits(1)), PIN, TourStatus.cancelled, f.room(), START);
         int active = create(f.otherRoom(), digits(1), START, 200).path("data").path("tourId").asInt();
         clearInvocations(notifications, slack);
-        JsonNode refused = send(put("/api/admin/tour-reservations/status/" + old).contextPath("/api")
+        JsonNode refused = send(put("/api/owner/tour-reservations/status/" + old).contextPath("/api")
                 .param("status", "confirmed").header(HttpHeaders.AUTHORIZATION,
-                        "Bearer " + jwt.createAccessToken(f.admin(), "admin")), null, 409);
+                        "Bearer " + jwt.createAccessToken(f.admin(), "owner")), null, 409);
         assertThat(refused.path("errorCode").asText()).isEqualTo(ErrorCode.TOUR_RESERVATION_DUPLICATE.getCode());
         assertThat(state(old)).isEqualTo("cancelled");
         assertThat(state(active)).isEqualTo("requested");

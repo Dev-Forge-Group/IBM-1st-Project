@@ -288,12 +288,14 @@ export default function ContractApply() {
       </div>
     );
   }
-  if (loadError || !room) {
+  if (loadError || !room || room.verifiedRentalOwner === false) {
     return (
       <div className={styles.page}>
         <Header />
         <div className={styles.center}>
-          <p>⚠️ {loadError || '방 정보를 찾을 수 없습니다.'}</p>
+          <p>⚠️ {loadError || (room
+            ? '소유 관계 확인 후 계약을 신청할 수 있습니다.'
+            : '방 정보를 찾을 수 없습니다.')}</p>
           <button className={styles.backBtn} onClick={() => navigate('/rooms')}>
             목록으로
           </button>
@@ -312,7 +314,7 @@ export default function ContractApply() {
           <div className={styles.successIcon}>🎉</div>
           <h2 className={styles.successTitle}>계약 신청이 완료되었습니다!</h2>
           <p className={styles.successDesc}>
-            관리자 검토 후 계약이 확정됩니다.
+            소유주가 신청을 검토합니다.
             <br />
             마이페이지에서 계약 상태를 확인하세요.
           </p>

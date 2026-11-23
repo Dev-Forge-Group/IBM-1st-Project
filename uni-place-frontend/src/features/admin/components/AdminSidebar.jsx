@@ -3,8 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import styles from './AdminSidebar.module.css';
 import { adminMenu } from '../constants/adminMenu';
 import { useAuth } from '../../user/hooks/useAuth';
-
-const ROLE_LABEL = { admin: '관리자', tenant: '입주자', user: '일반 회원', guest: '게스트' };
+import { hasAccountRole } from '../../../shared/auth/accountAccess';
 
 export default function AdminSidebar() {
   const navigate = useNavigate();
@@ -17,7 +16,7 @@ export default function AdminSidebar() {
   };
 
   const initials = (user?.userNm || user?.name || '관')[0];
-  const roleLabel = ROLE_LABEL[user?.userRole || user?.role] || '관리자';
+  const roleLabel = hasAccountRole(user, 'ADMIN') ? '계정 관리자' : '운영 계정';
 
   return (
     <aside className={styles.sidebar}>
@@ -33,7 +32,7 @@ export default function AdminSidebar() {
         <div className={styles.profileStats}>
           <div className={styles.profileStat}>
             <div className={styles.profileStatVal}>{roleLabel}</div>
-            <div className={styles.profileStatLbl}>회원 등급</div>
+            <div className={styles.profileStatLbl}>계정 유형</div>
           </div>
           {user?.userNickname && (
             <div className={styles.profileStat}>

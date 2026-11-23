@@ -27,7 +27,7 @@ function StatusBadge({ status }) {
   return <span className={`${styles.badge} ${s.cls}`}>{s.label}</span>;
 }
 
-export default function AdminTourReservationList() {
+export default function AdminTourReservationList({ api = adminApi } = {}) {
   const [searchParams] = useSearchParams();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -51,7 +51,7 @@ export default function AdminTourReservationList() {
     setLoading(true);
     setError('');
     try {
-      const res = await adminApi.tourReservations(query);
+      const res = await api.tourReservations(query);
       setItems(res?.content ?? []);
       setTotalElements(res?.totalElements ?? 0);
       setTotalPages(res?.totalPages ?? 1);
@@ -60,7 +60,7 @@ export default function AdminTourReservationList() {
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [api, query]);
 
   useEffect(() => {
     fetchList();
@@ -86,7 +86,7 @@ export default function AdminTourReservationList() {
     if (!statusModal || !statusValue) return;
     setStatusLoading(true);
     try {
-      await adminApi.changeTourStatus(statusModal.tourId, statusValue);
+      await api.changeTourStatus(statusModal.tourId, statusValue);
       setStatusModal(null);
       fetchList();
     } catch (e) {

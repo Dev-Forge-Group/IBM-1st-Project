@@ -8,6 +8,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 REQUIRED_SUITES = (
+    "org.myweb.uniplace.domain.ownership.api.OwnerAccountPropertyIntegrationTest",
     "org.myweb.uniplace.domain.community.application.CommunityPrivacyIntegrationTest",
     "org.myweb.uniplace.domain.ai.application.tool.AiDataContractMySqlTest",
     "org.myweb.uniplace.domain.commoncode.application.CommonCodeLookupIntegrationTest",

@@ -28,6 +28,8 @@ public interface TourReservationRepository extends JpaRepository<TourReservation
              and function('hex', replace(t.tourTel, '-', '')) = function('hex', :canonicalTel)))
         """;
 
+    Page<TourReservationEntity> findByRoom_RoomIdIn(Collection<Integer> roomIds, Pageable pageable);
+
     // Keep the legacy raw comparison. The new presentation branch compares phone and PIN bytes,
     // so MySQL's case/accent-insensitive collation cannot introduce extra credential aliases.
     String CREDENTIAL_MATCH = """

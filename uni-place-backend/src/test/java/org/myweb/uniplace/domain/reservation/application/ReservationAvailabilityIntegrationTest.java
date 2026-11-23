@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.reservation.application;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -17,6 +19,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.myweb.uniplace.domain.notification.application.NotificationService;
+import org.myweb.uniplace.domain.ownership.application.OwnershipAccessService;
 import org.myweb.uniplace.domain.notification.domain.enums.TargetType;
 import org.myweb.uniplace.domain.property.api.dto.request.SpaceSearchRequest;
 import org.myweb.uniplace.domain.property.api.dto.response.SpaceResponse;
@@ -62,7 +65,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /** Availability must use the same strict overlap rule as the public creation paths. */
 @DataJpaTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({TourReservationServiceImpl.class, SpaceReservationServiceImpl.class, ReservationValidator.class,
+@Import({OwnershipAccessService.class, TourReservationServiceImpl.class, SpaceReservationServiceImpl.class, ReservationValidator.class,
         TourReservationConflictPolicyImpl.class, SpaceReservationConflictPolicyImpl.class})
 @Testcontainers
 class ReservationAvailabilityIntegrationTest {
@@ -114,6 +117,7 @@ class ReservationAvailabilityIntegrationTest {
         tenant = users.saveAndFlush(User.builder().userId(id).userNm(id).userEmail(id + "@example.test")
                 .userPwd("test-only-hash").userBirth(LocalDate.of(2000, 1, 1)).userTel("010-0000-0000")
                 .userNickname(id).userRole(UserRole.tenant).build());
+        rentalOperator(jdbc, "availability-owner-" + building.getBuildingId(), building.getBuildingId());
     }
 
     @Test
@@ -187,8 +191,8 @@ class ReservationAvailabilityIntegrationTest {
                 room.getRoomId())).isEqualTo(2);
         assertThat(tourStarts()).containsExactly(at(11), at(12), at(13), at(14), at(15), at(16), at(17));
         for (Integer id : List.of(first.getTourId(), second.getTourId())) {
-            verify(notifications).notifyAdmins(eq("TOUR_REQ"), any(String.class), isNull(), eq(TargetType.tour),
-                    eq(id), eq("/admin/tour-reservations"));
+            verify(notifications).notifyUser(eq("availability-owner-" + building.getBuildingId()), eq("TOUR_REQ"),
+                    any(String.class), isNull(), eq(TargetType.tour), eq(id), eq("/owner/reservations/tours"));
         }
         // The surrounding test transaction has not committed; external alerts are deferred.
         // Committed delivery and rollback behavior are covered by TourReservationConcurrencyIntegrationTest.

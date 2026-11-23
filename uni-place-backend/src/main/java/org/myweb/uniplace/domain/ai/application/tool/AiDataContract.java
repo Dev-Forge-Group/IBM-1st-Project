@@ -42,11 +42,12 @@ public final class AiDataContract {
     /** Tables public and signed-in queries read without their personal or secret columns. */
     static final Map<String, String> PUBLIC_PROJECTIONS = Map.of(
         "building", "SELECT building_id, building_nm, building_addr, building_desc, land_category, build_size,"
-            + " building_usage, exist_elv, parking_capacity, created_at, updated_at, delete_yn FROM building",
+            + " building_usage, exist_elv, parking_capacity, created_at, updated_at, delete_yn FROM building"
+            + " WHERE building_id IN (SELECT building_id FROM ownership_public_building_ids)",
         "room_reservation", "SELECT tour_id, building_id, room_id, tour_start_at, tour_end_at, tour_st, created_at,"
-            + " updated_at FROM room_reservation",
+            + " updated_at FROM room_reservation WHERE room_id IN (SELECT room_id FROM ownership_public_room_ids)",
         "space_reservations", "SELECT reservation_id, building_id, space_id, sr_start_at, sr_end_at, sr_st"
-            + " FROM space_reservations",
+            + " FROM space_reservations WHERE building_id IN (SELECT building_id FROM ownership_public_building_ids)",
         "board", "SELECT board_id, board_title, CASE WHEN anonymity = 'Y' THEN NULL ELSE user_id END AS user_id,"
             + " board_ctnt, created_at, updated_at, read_count, code, anonymity, importance, imp_end_at, file_ck,"
             + " reply_ck FROM board",
@@ -121,6 +122,15 @@ public final class AiDataContract {
     }
 
     private static String publicRead(String table) {
+        // Trusted publication views preserve legacy readonly discovery and hide owner drafts in every AI read.
+        String propertyScope = switch (table) {
+            case "rooms", "reviews" -> "SELECT * FROM " + table
+                    + " WHERE room_id IN (SELECT room_id FROM ownership_public_room_ids)";
+            case "common_space", "product_building_stock" -> "SELECT * FROM " + table
+                    + " WHERE building_id IN (SELECT building_id FROM ownership_public_building_ids)";
+            default -> null;
+        };
+        if (propertyScope != null) return propertyScope;
         if (OPEN_TABLES.contains(table)) {
             return null;
         }

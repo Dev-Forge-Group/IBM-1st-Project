@@ -14,6 +14,7 @@ import lombok.*;
 @Builder
 public class SpaceUpdateRequest {
 
+    private Integer buildingId;
     private String buildingNm;
 
     private String spaceNm;

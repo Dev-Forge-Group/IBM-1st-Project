@@ -108,9 +108,9 @@ class CommunityPrivacyIntegrationTest {
             };
             jdbc.update("""
                 INSERT INTO users (user_id, user_nm, user_email, user_pwd, user_birth, user_tel,
-                                   user_nickname, user_role, user_st, delete_yn)
-                VALUES (?, ?, ?, 'test-only-hash', '2000-01-01', '010-0000-0000', ?, ?, 'active', 'N')
-                """, id, nickname, id + "@example.test", nickname, ADMIN.equals(id) ? "admin" : "user");
+                                   user_nickname, user_role, user_st, delete_yn, account_kind)
+                VALUES (?, ?, ?, 'test-only-hash', '2000-01-01', '010-0000-0000', ?, ?, 'active', 'N', ?)
+                """, id, nickname, id + "@example.test", nickname, ADMIN.equals(id) ? "admin" : "user", ADMIN.equals(id) ? "STAFF" : "MEMBER");
         }
         anonymousBoard = board("Privacy anonymous board", "Y");
         // Make the anonymous board a weekly-top candidate as well as a normal/category list entry.
@@ -151,16 +151,13 @@ class CommunityPrivacyIntegrationTest {
     }
 
     @Test
-    void onlyAnAdministratorReceivesTheActualAnonymousBoardAuthor() throws Exception {
+    void staffAccountManagementDoesNotRevealAnAnonymousBoardAuthor() throws Exception {
         anonymousBoard(read(detail(anonymousBoard), OTHER), false);
         JsonNode detail = read(detail(anonymousBoard), ADMIN);
-        assertThat(detail.path("userId").asText()).isEqualTo("익명(글쓴이)");
-        assertThat(detail.path("realUserId").asText()).isEqualTo(AUTHOR);
-        assertThat(detail.path("realUserNickname").asText()).isEqualTo(AUTHOR_NICKNAME);
-        assertMine(detail, false);
+        anonymousBoard(detail, false);
         JsonNode listEntry = byId(read("/boards?boardType=FREE&size=100", ADMIN).path("content"),
                 "boardId", anonymousBoard.getBoardId());
-        assertThat(listEntry.path("realUserId").asText()).isEqualTo(AUTHOR);
+        anonymousBoard(listEntry, false);
     }
 
     @Test
@@ -202,15 +199,11 @@ class CommunityPrivacyIntegrationTest {
     }
 
     @Test
-    void onlyAnAdminReceivesActualAnonymousReplyIdentityOnBothRootAndChildRoutes() throws Exception {
+    void staffCannotIdentifyAnonymousRepliesOnEitherRootOrChildRoutes() throws Exception {
         JsonNode root = byId(read(rootReplies(anonymousBoard), ADMIN), "replyId", otherReply.getReplyId());
-        assertThat(root.path("realUserId").asText()).isEqualTo(OTHER);
-        assertThat(root.path("realUserNickname").asText()).isEqualTo(OTHER_NICKNAME);
-        assertThat(root.hasNonNull("userId")).isFalse();
-        assertMine(root, false);
+        anonymousReply(root, 1, false);
         JsonNode child = byId(read(childReplies(anonymousBoard, otherReply), ADMIN), "replyId", thirdChild.getReplyId());
-        assertThat(child.path("realUserId").asText()).isEqualTo(THIRD);
-        assertThat(child.path("anonymousId").asInt()).isEqualTo(2);
+        anonymousReply(child, 2, false);
     }
 
     @Test

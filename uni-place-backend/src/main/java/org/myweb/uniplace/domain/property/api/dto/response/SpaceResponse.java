@@ -1,6 +1,8 @@
 // 경로: org/myweb/uniplace/domain/property/api/dto/response/SpaceResponse.java
 package org.myweb.uniplace.domain.property.api.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import org.myweb.uniplace.domain.property.domain.entity.Building;
 import org.myweb.uniplace.domain.property.domain.entity.CommonSpace;
 
@@ -9,7 +11,7 @@ import lombok.*;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
+@Builder(toBuilder = true)
 public class SpaceResponse {
 
     private Integer spaceId;
@@ -32,6 +34,20 @@ public class SpaceResponse {
     private String thumbnailUrl;
     
     //썸네일없는거
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String ownershipStatus;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean publicVisible;
+
+    public SpaceResponse withPublicVisibility(boolean visible) {
+        return toBuilder().publicVisible(visible).build();
+    }
+
+    public SpaceResponse withOwnershipStatus(String status) {
+        return toBuilder().ownershipStatus(status).build();
+    }
+
     public static SpaceResponse fromEntity(CommonSpace e) {
 
         Building b = e.getBuilding();

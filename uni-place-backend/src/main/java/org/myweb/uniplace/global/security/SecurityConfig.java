@@ -2,6 +2,7 @@ package org.myweb.uniplace.global.security;
 
 import lombok.RequiredArgsConstructor;
 import org.myweb.uniplace.domain.user.repository.UserRepository;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.global.security.oauth.CustomOAuth2UserService;
 import org.myweb.uniplace.global.security.oauth.CustomAuthorizationRequestResolver;
 import org.myweb.uniplace.global.security.oauth.HttpCookieOAuth2AuthorizationRequestRepository;
@@ -18,6 +19,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.expression.WebExpressionAuthorizationManager;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.util.matcher.RegexRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
@@ -33,6 +35,7 @@ public class SecurityConfig {
 
     private final JwtProvider jwtProvider;
     private final UserRepository userRepository;
+    private final OwnershipAccess ownershipAccess;
     private final CustomOAuth2UserService customOAuth2UserService;
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
     private final OAuth2FailureHandler oAuth2FailureHandler;
@@ -44,7 +47,9 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        JwtAuthFilter jwtAuthFilter = new JwtAuthFilter(jwtProvider, userRepository);
+        JwtAuthFilter jwtAuthFilter = new JwtAuthFilter(jwtProvider, userRepository, ownershipAccess);
+        var consumerOrAnonymous = new WebExpressionAuthorizationManager(
+                "isAnonymous() or hasAnyRole('GUEST', 'USER', 'TENANT', 'OWNER')");
 
         http
             .csrf(csrf -> csrf.disable())
@@ -55,8 +60,16 @@ public class SecurityConfig {
                 .accessDeniedHandler(restAccessDeniedHandler)
             )
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers(new RegexRequestMatcher("(?i)^/static-files/contract(?:[/?].*)?$", null)).denyAll()
-                .requestMatchers("/files/admin", "/files/admin/**").hasRole("ADMIN")
+                .requestMatchers(new RegexRequestMatcher("(?i)^/static-files/(?:contract|room|building|space)(?:[/?].*)?$", null)).denyAll()
+                .requestMatchers("/files/admin", "/files/admin/**").denyAll()
+                .requestMatchers("/admin/users", "/admin/users/**",
+                        "/admin/owner-applications", "/admin/owner-applications/**",
+                        "/admin/asset-claims", "/admin/asset-claims/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/admin/common-codes/PRODUCT_CATEGORY").permitAll()
+                .requestMatchers("/admin", "/admin/**").denyAll()
+                .requestMatchers("/owner", "/owner/**").hasRole("OWNER")
+                .requestMatchers("/users/me", "/users/me/**", "/notifications", "/notifications/**")
+                        .hasAnyRole("ADMIN", "USER", "TENANT", "OWNER")
                 .requestMatchers("/auth/signup").permitAll()
                 .requestMatchers("/auth/login").permitAll()
                 .requestMatchers("/auth/guest-token").permitAll()
@@ -65,9 +78,9 @@ public class SecurityConfig {
                 .requestMatchers("/auth/check-nickname").permitAll()
                 .requestMatchers("/auth/oauth2/kakao/complete").permitAll()
                 .requestMatchers("/auth/oauth2/google/complete").permitAll()
-                // AI 엔드포인트: 어드민 챗봇은 ADMIN 전용, 나머지는 permitAll
-                .requestMatchers("/ai/chat/admin-chatbot").hasRole("ADMIN")
-                .requestMatchers("/ai/**").authenticated()
+                // Global business analytics are not account-administration capabilities.
+                .requestMatchers("/ai/chat/admin-chatbot").denyAll()
+                .requestMatchers("/ai/**").hasAnyRole("USER", "TENANT", "OWNER")
                 .requestMatchers("/error").permitAll()
                 .requestMatchers("/member/login").permitAll()
                 .requestMatchers("/login/**").permitAll()
@@ -79,9 +92,9 @@ public class SecurityConfig {
                 .requestMatchers("/payments/webhook/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/tour-reservations/rooms").permitAll()
                 .requestMatchers(HttpMethod.GET, "/tour-reservations/slots").permitAll()
-                .requestMatchers(HttpMethod.POST, "/tour-reservations").permitAll()
-                .requestMatchers(HttpMethod.POST, "/tour-reservations/lookup").permitAll()
-                .requestMatchers(HttpMethod.PUT, "/tour-reservations/cancel/**").permitAll()
+                .requestMatchers(HttpMethod.POST, "/tour-reservations").access(consumerOrAnonymous)
+                .requestMatchers(HttpMethod.POST, "/tour-reservations/lookup").access(consumerOrAnonymous)
+                .requestMatchers(HttpMethod.PUT, "/tour-reservations/cancel/**").access(consumerOrAnonymous)
                 .requestMatchers(HttpMethod.GET, "/buildings/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/buildings").permitAll()
                 .requestMatchers(HttpMethod.GET, "/rooms/**").permitAll()
@@ -96,39 +109,39 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/reviews/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/boards").permitAll()
                 .requestMatchers(HttpMethod.GET, "/boards/**").permitAll()
-                .requestMatchers(HttpMethod.POST, "/reviews/*/likes").authenticated()
-                .requestMatchers(HttpMethod.DELETE, "/reviews/*/likes").authenticated()
-                .requestMatchers(HttpMethod.POST, "/reviews").authenticated()
-                .requestMatchers(HttpMethod.PUT, "/reviews/**").authenticated()
-                .requestMatchers(HttpMethod.DELETE, "/reviews/**").authenticated()
+                .requestMatchers(HttpMethod.POST, "/reviews/*/likes").hasAnyRole("USER", "TENANT", "OWNER")
+                .requestMatchers(HttpMethod.DELETE, "/reviews/*/likes").hasAnyRole("USER", "TENANT", "OWNER")
+                .requestMatchers(HttpMethod.POST, "/reviews").hasAnyRole("USER", "TENANT", "OWNER")
+                .requestMatchers(HttpMethod.PUT, "/reviews/**").hasAnyRole("USER", "TENANT", "OWNER")
+                .requestMatchers(HttpMethod.DELETE, "/reviews/**").hasAnyRole("USER", "TENANT", "OWNER")
                 .requestMatchers(HttpMethod.GET, "/notices").permitAll()
                 .requestMatchers(HttpMethod.GET, "/notices/**").permitAll()
-                .requestMatchers(HttpMethod.POST, "/notices").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.PUT, "/notices/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.DELETE, "/notices/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/notices").denyAll()
+                .requestMatchers(HttpMethod.PUT, "/notices/**").denyAll()
+                .requestMatchers(HttpMethod.DELETE, "/notices/**").denyAll()
                 .requestMatchers(HttpMethod.GET, "/faqs").permitAll()
                 .requestMatchers(HttpMethod.GET, "/faqs/**").permitAll()
-                .requestMatchers(HttpMethod.POST, "/faqs").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.PUT, "/faqs/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.DELETE, "/faqs/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.GET, "/complains/me").authenticated()
-                .requestMatchers(HttpMethod.GET, "/complains").authenticated()
-                .requestMatchers(HttpMethod.GET, "/complains/**").authenticated()
-                .requestMatchers(HttpMethod.POST, "/complains").hasAnyRole("ADMIN", "TENANT")
-                .requestMatchers(HttpMethod.PUT, "/complains/**").hasAnyRole("ADMIN", "TENANT")
-                .requestMatchers(HttpMethod.PATCH, "/complains/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.DELETE, "/complains/**").hasAnyRole("ADMIN", "TENANT")
-                .requestMatchers(HttpMethod.GET, "/qna/all").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.GET, "/qna").authenticated()
-                .requestMatchers(HttpMethod.GET, "/qna/**").authenticated()
-                .requestMatchers(HttpMethod.POST, "/qna").hasAnyRole("ADMIN", "TENANT")
-                .requestMatchers(HttpMethod.POST, "/qna/**").hasAnyRole("ADMIN", "TENANT")
-                .requestMatchers(HttpMethod.PUT, "/qna/**").hasAnyRole("ADMIN", "TENANT")
-                .requestMatchers(HttpMethod.PATCH, "/qna/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.DELETE, "/qna/**").hasAnyRole("ADMIN", "TENANT")
+                .requestMatchers(HttpMethod.POST, "/faqs").denyAll()
+                .requestMatchers(HttpMethod.PUT, "/faqs/**").denyAll()
+                .requestMatchers(HttpMethod.DELETE, "/faqs/**").denyAll()
+                .requestMatchers(HttpMethod.GET, "/complains/me").hasAnyRole("USER", "TENANT", "OWNER")
+                .requestMatchers(HttpMethod.GET, "/complains").hasAnyRole("USER", "TENANT", "OWNER")
+                .requestMatchers(HttpMethod.GET, "/complains/**").hasAnyRole("USER", "TENANT", "OWNER")
+                .requestMatchers(HttpMethod.POST, "/complains").hasRole("TENANT")
+                .requestMatchers(HttpMethod.PUT, "/complains/**").hasRole("TENANT")
+                .requestMatchers(HttpMethod.PATCH, "/complains/**").denyAll()
+                .requestMatchers(HttpMethod.DELETE, "/complains/**").hasRole("TENANT")
+                .requestMatchers(HttpMethod.GET, "/qna/all").denyAll()
+                .requestMatchers(HttpMethod.GET, "/qna").hasAnyRole("USER", "TENANT", "OWNER")
+                .requestMatchers(HttpMethod.GET, "/qna/**").hasAnyRole("USER", "TENANT", "OWNER")
+                .requestMatchers(HttpMethod.POST, "/qna").hasRole("TENANT")
+                .requestMatchers(HttpMethod.POST, "/qna/**").hasRole("TENANT")
+                .requestMatchers(HttpMethod.PUT, "/qna/**").hasRole("TENANT")
+                .requestMatchers(HttpMethod.PATCH, "/qna/**").denyAll()
+                .requestMatchers(HttpMethod.DELETE, "/qna/**").hasRole("TENANT")
                 .requestMatchers(HttpMethod.GET, "/files/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/files").permitAll()            
-                .requestMatchers(HttpMethod.POST, "/files").permitAll()
+                .requestMatchers(HttpMethod.POST, "/files").hasAnyRole("USER", "TENANT", "OWNER")
                 .requestMatchers("/auth/find-email").permitAll()
                 .requestMatchers("/auth/reset-password/request").permitAll()
                 .requestMatchers("/auth/reset-password/verify").permitAll()
@@ -136,17 +149,15 @@ public class SecurityConfig {
                 .requestMatchers("/auth/face/login").permitAll()     // 얼굴 로그인 (하위호환)
                 .requestMatchers("/auth/face/match").permitAll()     // 1단계: 얼굴 매칭
                 .requestMatchers("/auth/face/select").permitAll()    // 2단계: 계정 선택
-                .requestMatchers("/auth/face/register").authenticated()
-                .requestMatchers("/auth/face/count").authenticated()
-                .requestMatchers("/auth/face").authenticated()
-                .requestMatchers("/v1/ai/tools/execute").permitAll()
-                .requestMatchers(HttpMethod.POST, "/v1/ai/files/upload").permitAll()
+                .requestMatchers("/auth/face/register").hasAnyRole("ADMIN", "USER", "TENANT", "OWNER")
+                .requestMatchers("/auth/face/count").hasAnyRole("ADMIN", "USER", "TENANT", "OWNER")
+                .requestMatchers("/auth/face").hasAnyRole("ADMIN", "USER", "TENANT", "OWNER")
+                .requestMatchers("/v1/ai/tools/execute").access(consumerOrAnonymous)
+                .requestMatchers(HttpMethod.POST, "/v1/ai/files/upload").hasAnyRole("USER", "TENANT", "OWNER")
                 .requestMatchers("/auth/email/send-code").permitAll()
                 .requestMatchers("/auth/email/verify-code").permitAll()
-                .requestMatchers(HttpMethod.DELETE, "/files").permitAll()
-                .requestMatchers(HttpMethod.GET, "/admin/common-codes/PRODUCT_CATEGORY").permitAll()
-                .requestMatchers("/admin/**").hasRole("ADMIN")
-                .anyRequest().authenticated()
+                .requestMatchers(HttpMethod.DELETE, "/files").hasAnyRole("USER", "TENANT", "OWNER")
+                .anyRequest().hasAnyRole("USER", "TENANT", "OWNER")
             )
             .oauth2Login(oauth2 -> oauth2
                 .loginPage("/login")

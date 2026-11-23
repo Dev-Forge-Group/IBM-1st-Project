@@ -1,6 +1,8 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import styles from './Header.module.css';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { isMemberAccount, isStaffAccount } from '../../../shared/auth/accountAccess';
+import workspace from '../../../features/owner/components/OwnerWorkspace.module.css';
 import { useAuth } from '../../../features/user/hooks/useAuth';
 import NotificationBell from './NotificationBell';
 import homeLogo from '../../../logo.png';
@@ -215,20 +217,8 @@ export default function Header() {
     }
   }, [logout, navigate]);
 
-  function normalizeRole(u) {
-    const raw =
-      u?.userRole ??
-      u?.role ??
-      u?.userRl ??
-      u?.user_role ??
-      u?.authority ??
-      u?.authorities?.[0];
-    return String(raw ?? '')
-      .toLowerCase()
-      .replace('role_', '');
-  }
-
-  const isAdmin = normalizeRole(user) === 'admin';
+  const isAdmin = isStaffAccount(user);
+  const navigation = isAdmin ? [{ label: '계정 관리', path: '/admin/users' }, { label: '소유주 확인', path: '/admin/owners' }] : NAV_ITEMS;
 
   return (
     <header className={styles.header}>
@@ -251,13 +241,17 @@ export default function Header() {
 
         {/* 네비게이션 */}
         <nav className={styles.nav} aria-label="메인 메뉴">
-          {NAV_ITEMS.map((item) => (
+          {navigation.map((item) => (
             <NavItem key={item.path} item={item} />
           ))}
         </nav>
 
         {/* 우측 — 알림벨 → 마이페이지 아이콘 → 로그아웃/로그인 */}
         <div className={styles.icons}>
+          {!loading && isMemberAccount(user) && <nav className={workspace.switch} aria-label="업무 전환">
+            <NavLink to="/me">이용자</NavLink>
+            <NavLink to="/owner">소유주</NavLink>
+          </nav>}
           {/* 알림벨 — 로그인 상태일 때만 */}
           {!loading && user && (
             <div className={styles.bellWrap}>

@@ -20,7 +20,7 @@ function StatusBadge({ status }) {
   return <span className={`${styles.badge} ${s.cls}`}>{s.label}</span>;
 }
 
-export default function AdminSpaceReservationList() {
+export default function AdminSpaceReservationList({ api = adminApi } = {}) {
   const [searchParams] = useSearchParams();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -50,7 +50,7 @@ export default function AdminSpaceReservationList() {
     setLoading(true);
     setError('');
     try {
-      const res = await adminApi.spaceReservations({ ...filter, ...query });
+      const res = await api.spaceReservations({ ...filter, ...query });
       setItems(res?.content ?? []);
       setTotalElements(res?.totalElements ?? 0);
       setTotalPages(res?.totalPages ?? 1);
@@ -59,7 +59,7 @@ export default function AdminSpaceReservationList() {
     } finally {
       setLoading(false);
     }
-  }, [filter, query]);
+  }, [api, filter, query]);
 
   useEffect(() => {
     fetchList();
@@ -73,7 +73,7 @@ export default function AdminSpaceReservationList() {
     let canceled = false;
     async function loadDetail() {
       try {
-        const res = await adminApi.spaceReservationDetail(
+        const res = await api.spaceReservationDetail(
           Math.trunc(reservationId)
         );
         if (canceled) return;
@@ -87,11 +87,11 @@ export default function AdminSpaceReservationList() {
     return () => {
       canceled = true;
     };
-  }, [searchKey]);
+  }, [api, searchKey]);
 
   const openDetail = async (reservationId) => {
     try {
-      const res = await adminApi.spaceReservationDetail(reservationId);
+      const res = await api.spaceReservationDetail(reservationId);
       setDetailModal(res);
       setCancelReason('');
     } catch (e) {
@@ -104,11 +104,11 @@ export default function AdminSpaceReservationList() {
     setActionLoading(true);
     try {
       if (type === 'confirm')
-        await adminApi.confirmSpaceReservation(detailModal.reservationId);
+        await api.confirmSpaceReservation(detailModal.reservationId);
       else if (type === 'end')
-        await adminApi.endSpaceReservation(detailModal.reservationId);
+        await api.endSpaceReservation(detailModal.reservationId);
       else if (type === 'cancel')
-        await adminApi.cancelSpaceReservation(
+        await api.cancelSpaceReservation(
           detailModal.reservationId,
           cancelReason
         );

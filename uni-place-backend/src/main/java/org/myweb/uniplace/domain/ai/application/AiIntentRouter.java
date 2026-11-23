@@ -25,6 +25,7 @@ public class AiIntentRouter {
         }
 
         AiIntent targetIntent = request.getIntent();
+        if (targetIntent == AiIntent.ADMIN_CHATBOT) throw new BusinessException(ErrorCode.FORBIDDEN);
 
         return useCases.stream()
             .filter(useCase -> useCase.supports(targetIntent))

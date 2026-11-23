@@ -15,6 +15,7 @@ import org.myweb.uniplace.domain.contract.domain.entity.Resident;
 import org.myweb.uniplace.domain.contract.domain.enums.ContractStatus;
 import org.myweb.uniplace.domain.contract.repository.ContractRepository;
 import org.myweb.uniplace.domain.contract.repository.ResidentRepository;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.file.api.dto.request.FileUploadRequest;
 import org.myweb.uniplace.domain.file.api.dto.response.FileResponse;
 import org.myweb.uniplace.domain.file.api.dto.response.FileUploadResponse;
@@ -27,7 +28,6 @@ import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.domain.property.domain.enums.RoomStatus;
 import org.myweb.uniplace.domain.property.repository.RoomRepository;
 import org.myweb.uniplace.domain.user.domain.entity.User;
-import org.myweb.uniplace.domain.user.domain.enums.UserRole;
 import org.myweb.uniplace.domain.user.repository.UserRepository;
 import org.myweb.uniplace.global.exception.BusinessException;
 import org.myweb.uniplace.global.exception.ErrorCode;
@@ -53,6 +53,7 @@ public class ContractServiceImpl implements ContractService {
 
     private final ContractRepository contractRepository;
     private final ResidentRepository residentRepository;
+    private final OwnershipAccess ownershipAccess;
     private final RoomRepository roomRepository;
     private final UserRepository userRepository;
     private final FileService fileService;
@@ -64,7 +65,10 @@ public class ContractServiceImpl implements ContractService {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null) throw new BusinessException(ErrorCode.UNAUTHORIZED);
         Object principal = authentication.getPrincipal();
-        if (principal instanceof AuthUser authUser) return authUser.getUserId();
+        if (principal instanceof AuthUser authUser) {
+            if (authUser.isStaff() || authUser.hasRole("GUEST")) throw new BusinessException(ErrorCode.FORBIDDEN);
+            return authUser.getUserId();
+        }
         throw new BusinessException(ErrorCode.UNAUTHORIZED);
     }
 
@@ -81,6 +85,7 @@ public class ContractServiceImpl implements ContractService {
             .orElseThrow(() -> new BusinessException(ErrorCode.ROOM_NOT_FOUND));
 
         if (room.isDeleted()) throw new BusinessException(ErrorCode.ROOM_NOT_FOUND);
+        ownershipAccess.requireVerifiedRentalRoom(room.getRoomId());
 
         boolean roomOverlapped = contractRepository.existsOverlappedContract(
             room.getRoomId(),
@@ -109,11 +114,11 @@ public class ContractServiceImpl implements ContractService {
 
         Contract saved = contractRepository.save(contract);
 
-        safeNotifyAdmins(
-            NotificationType.CONTRACT_REQ.name(),
-            "계약 신청이 접수되었습니다. userId=" + userId + ", roomId=" + room.getRoomId(),
-            null
-        );
+        ownershipAccess.recordContractOwners(saved.getContractId(), room.getRoomId());
+        for (String ownerId : ownershipAccess.contractOwnerIds(saved.getContractId())) {
+            safeNotifyOwner(ownerId, saved.getContractId(),
+                    "계약 신청이 접수되었습니다. roomId=" + room.getRoomId());
+        }
         
         slackNotificationService.send(String.format("""
         	    📋 *새 계약 신청이 접수되었습니다!*
@@ -121,7 +126,7 @@ public class ContractServiceImpl implements ContractService {
         	    • 사용자  : %s
         	    • 건물    : %s
         	    • 객실    : %s호 (ID: %d)
-        	    • 관리자 페이지 : /admin/contracts
+		    • 소유주 페이지 : /owner/contracts
         	    """,
         	    saved.getContractId(),
         	    userId,
@@ -348,12 +353,6 @@ public class ContractServiceImpl implements ContractService {
             log.info("[Room] set contracted contractId={} roomId={}", c.getContractId(), room.getRoomId());
         }
 
-        if (c.getUser() != null && c.getUser().getUserRole() == UserRole.user) {
-            c.getUser().changeRole(UserRole.tenant);
-            userRepository.save(c.getUser());
-            log.info("[UserRole] promoted to tenant contractId={} userId={}", c.getContractId(), c.getUser().getUserId());
-        }
-
         if (notifyUser && userId != null) {
             safeNotify(userId, NotificationType.CONTRACT_CFM.name(),
                 "계약이 활성화되었습니다. 계약 번호: " + c.getContractId());
@@ -386,16 +385,6 @@ public class ContractServiceImpl implements ContractService {
             }
         }
 
-        if (c.getUser() != null && c.getUser().getUserRole() == UserRole.tenant) {
-            boolean hasOtherActive = contractRepository.existsByUser_UserIdAndContractSt(
-                c.getUser().getUserId(), ContractStatus.active
-            );
-            if (!hasOtherActive) {
-                c.getUser().changeRole(UserRole.user);
-                userRepository.save(c.getUser());
-                log.info("[UserRole] rolled back to user userId={}", c.getUser().getUserId());
-            }
-        }
     }
 
     private void notifyApproved(Contract c) {
@@ -443,12 +432,12 @@ public class ContractServiceImpl implements ContractService {
         }
     }
 
-    private void safeNotifyAdmins(String code, String msg, Integer contractId) {
+    private void safeNotifyOwner(String ownerId, Integer contractId, String message) {
         try {
-            notificationService.notifyAdmins(code, msg, null,
-            	TargetType.contract, contractId, "/admin/contracts");
+            notificationService.notifyUser(ownerId, NotificationType.CONTRACT_REQ.name(), message, null,
+                    TargetType.contract, contractId, "/owner/contracts?contractId=" + contractId);
         } catch (Exception e) {
-            log.warn("[CONTRACT][NOTIFY][ADMIN] code={} reason={}", code, e.getMessage());
+            log.warn("[CONTRACT][NOTIFY][OWNER] contractId={} reason={}", contractId, e.getMessage());
         }
     }
 }

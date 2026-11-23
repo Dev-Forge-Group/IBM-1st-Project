@@ -3,6 +3,7 @@ package org.myweb.uniplace.domain.user.domain.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.myweb.uniplace.domain.user.domain.enums.UserRole;
+import org.myweb.uniplace.domain.user.domain.enums.AccountKind;
 import org.myweb.uniplace.domain.user.domain.enums.UserStatus;
 import org.myweb.uniplace.global.common.BaseTimeEntity;
 
@@ -52,6 +53,10 @@ public class User extends BaseTimeEntity {
     @Column(name = "user_role", length = 20, nullable = false)
     private UserRole userRole;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "account_kind", length = 20, nullable = false)
+    private AccountKind accountKind;
+
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
 
@@ -72,6 +77,7 @@ public class User extends BaseTimeEntity {
     @PrePersist
     void onCreate() {
         if (userRole == null) userRole = UserRole.user;
+        if (accountKind == null) accountKind = userRole == UserRole.admin ? AccountKind.STAFF : AccountKind.MEMBER;
         if (userSt == null) userSt = UserStatus.active;
         if (deleteYN == null) deleteYN = "N";
         if (firstSign == null) firstSign = "Y";

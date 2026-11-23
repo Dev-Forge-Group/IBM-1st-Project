@@ -33,15 +33,19 @@ import org.myweb.uniplace.domain.notification.domain.enums.TargetType;
 
 import org.myweb.uniplace.global.exception.BusinessException;
 import org.myweb.uniplace.global.exception.ErrorCode;
+import org.myweb.uniplace.global.security.AuthUser;
 import org.myweb.uniplace.global.slack.SlackNotificationService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -54,6 +58,7 @@ public class TourReservationServiceImpl implements TourReservationService {
     private final TourReservationRepository tourReservationRepository;
     private final BuildingRepository buildingRepository;
     private final RoomRepository roomRepository;
+    private final OwnershipAccess ownership;
     private final JdbcTemplate jdbc;
 
     @PersistenceContext
@@ -69,7 +74,7 @@ public class TourReservationServiceImpl implements TourReservationService {
 
     @Override
     public TourReservationResponse create(CreateTourReservationRequest request) {
-
+        requireConsumerOrGuest();
         if (request == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST);
         }
@@ -98,6 +103,8 @@ public class TourReservationServiceImpl implements TourReservationService {
         if (room.getBuilding() == null || !building.getBuildingId().equals(room.getBuilding().getBuildingId())) {
             throw new BusinessException(ErrorCode.TOUR_RESERVATION_BUILDING_ROOM_MISMATCH);
         }
+
+        ownership.requireVerifiedRentalRoom(room.getRoomId());
 
         if (room.getRoomSt() != RoomStatus.available) {
             throw new BusinessException(ErrorCode.TOUR_RESERVATION_ROOM_UNAVAILABLE);
@@ -130,7 +137,7 @@ public class TourReservationServiceImpl implements TourReservationService {
 
         String timeMsg = saved.getTourStartAt() + " ~ " + saved.getTourEndAt();
 
-        notificationService.notifyAdmins(
+        notifyOwners(room.getRoomId(),
                 NotificationType.TOUR_REQ.name(),
                 "투어 예약 요청이 생성되었습니다. buildingId=" + building.getBuildingId()
                         + ", roomId=" + room.getRoomId()
@@ -140,7 +147,7 @@ public class TourReservationServiceImpl implements TourReservationService {
                 null,
                 TargetType.tour,
                 saved.getTourId(),
-                "/admin/tour-reservations"
+                "/owner/reservations/tours"
         );
         
         notifySlackAfterCommit(saved, timeMsg);
@@ -151,7 +158,7 @@ public class TourReservationServiceImpl implements TourReservationService {
     @Override
     @Transactional(readOnly = true)
     public Page<TourReservationResponse> lookup(LookupTourReservationRequest request, Pageable pageable) {
-
+        requireConsumerOrGuest();
         Page<TourReservationEntity> page = tourReservationRepository.findByTourTelAndTourPwd(
                 request.getTourTel(),
                 request.getTourPwd(),
@@ -168,6 +175,7 @@ public class TourReservationServiceImpl implements TourReservationService {
     @Override
     @Transactional(readOnly = true)
     public Page<TourReservationResponse> lookup(LookupTourReservationRequest request, TourStatus status, Pageable pageable) {
+        requireConsumerOrGuest();
         if (status == null) {
             // Omitted status retains the legacy empty-page rejection and all-history query.
             return lookup(request, pageable);
@@ -184,7 +192,7 @@ public class TourReservationServiceImpl implements TourReservationService {
 
     @Override
     public TourReservationResponse cancel(Integer tourId, CancelTourReservationRequest request) {
-
+        requireConsumerOrGuest();
         lockWrites();
         TourReservationEntity resv = tourReservationRepository.lockByTourIdAndTelephoneCredentials(
                 tourId,
@@ -211,7 +219,7 @@ public class TourReservationServiceImpl implements TourReservationService {
 
         String timeMsg = resv.getTourStartAt() + " ~ " + resv.getTourEndAt();
 
-        notificationService.notifyAdmins(
+        notifyOwners(resv.getRoom().getRoomId(),
                 NotificationType.TOUR_CAN.name(),
                 "투어 예약이 취소되었습니다. tourId=" + resv.getTourId()
                         + ", tel=" + resv.getTourTel()
@@ -220,7 +228,7 @@ public class TourReservationServiceImpl implements TourReservationService {
                 null,
                 TargetType.tour,
                 resv.getTourId(),
-                "/admin/tour-reservations"
+                "/owner/reservations/tours"
         );
 
         return TourReservationResponse.fromEntity(resv);
@@ -231,10 +239,12 @@ public class TourReservationServiceImpl implements TourReservationService {
         if (tourId == null || status == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST);
         }
+        ownership.requireOwner();
         lockWrites();
         TourReservationEntity reservation = tourReservationRepository.lockByTourId(tourId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOUR_STATUS_NOT_FOUND));
         entityManager.refresh(reservation, LockModeType.PESSIMISTIC_WRITE);
+        ownership.requireCanManageRoom(reservation.getRoom().getRoomId());
 
         // Restoring inactive history occupies time again; active-to-active changes must not conflict with themselves.
         if (INACTIVE.contains(reservation.getTourSt()) && !INACTIVE.contains(status)) {
@@ -247,6 +257,16 @@ public class TourReservationServiceImpl implements TourReservationService {
         tourReservationRepository.saveAndFlush(reservation);
     }
 
+    private void requireConsumerOrGuest() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication instanceof AnonymousAuthenticationToken) return;
+        if (!authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof AuthUser user)) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if ("MEMBER".equals(user.getAccountKind())) ownership.requireMember();
+        else if (!"GUEST".equals(user.getAccountKind())) throw new BusinessException(ErrorCode.FORBIDDEN);
+    }
+
     private void lockWrites() {
         // JdbcTemplate participates in this JPA transaction without flushing stale managed rows first.
         // The seeded row must exist: do not silently continue or create it on demand.
@@ -254,6 +274,13 @@ public class TourReservationServiceImpl implements TourReservationService {
                 "SELECT guard_id FROM tour_reservation_write_guard WHERE guard_id = 1 FOR UPDATE", Integer.class);
         if (!Integer.valueOf(1).equals(guard)) {
             throw new IllegalStateException("Tour reservation write guard is missing");
+        }
+    }
+
+    private void notifyOwners(Integer roomId, String code, String message, String sender,
+                              TargetType target, Integer targetId, String url) {
+        for (String ownerId : ownership.eligibleOwnerIdsForRoom(roomId)) {
+            notificationService.notifyUser(ownerId, code, message, sender, target, targetId, url);
         }
     }
 
@@ -302,6 +329,9 @@ public class TourReservationServiceImpl implements TourReservationService {
         if (room.getBuilding() == null || !building.getBuildingId().equals(room.getBuilding().getBuildingId())) {
             throw new BusinessException(ErrorCode.TOUR_RESERVATION_BUILDING_ROOM_MISMATCH);
         }
+
+        ownership.requirePublicBuilding(buildingId);
+        ownership.requirePublicRoom(roomId);
 
         LocalDateTime dayStart = date.atStartOfDay();
         LocalDateTime dayEnd   = date.plusDays(1).atStartOfDay();

@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.contract.api.admin;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.clearInvocations;
@@ -136,12 +138,13 @@ class ResidentCreationTransactionIntegrationTest {
             String suffix = String.valueOf(building.getBuildingId());
             User owner = user("resident-owner-" + suffix, UserRole.tenant);
             User other = user("resident-other-" + suffix, UserRole.user);
-            User admin = user("resident-admin-" + suffix, UserRole.admin);
+            User admin = user("resident-owner-operator-" + suffix, UserRole.user);
             Room room = rooms.saveAndFlush(Room.builder().building(building).roomNo(901).floor(1)
                     .roomSize(new BigDecimal("20.00")).rentPrice(new BigDecimal("500000"))
                     .deposit(new BigDecimal("1000000")).manageFee(new BigDecimal("50000"))
                     .rentMin(1).roomSt(RoomStatus.contracted).build());
             Contract contract = contract(owner, room);
+            grantRentalOwner(jdbc, admin.getUserId(), building.getBuildingId(), room.getRoomId(), contract.getContractId());
             return new Fixture(owner.getUserId(), other.getUserId(), admin.getUserId(),
                     building.getBuildingId(), otherBuilding.getBuildingId(), room.getRoomId(), contract.getContractId());
         });
@@ -149,7 +152,7 @@ class ResidentCreationTransactionIntegrationTest {
     }
 
     @Test
-    void anAdministratorCreatesACommittedResidentAndSequentialRetryReturnsTheSameRow() throws Exception {
+    void anApprovedPropertyOwnerCreatesACommittedResidentAndSequentialRetryReturnsTheSameRow() throws Exception {
         Snapshot before = snapshot();
         JsonNode created = data(request("POST", json.writeValueAsString(validFields()), adminToken()));
         int residentId = created.path("residentId").asInt();
@@ -248,18 +251,22 @@ class ResidentCreationTransactionIntegrationTest {
     }
 
     static Stream<Arguments> deniedActorsAndMethods() {
-        return Stream.of("anonymous", "guest", "user", "tenant")
+        return Stream.of("anonymous", "guest", "user", "tenant", "staff")
                 .flatMap(actor -> Stream.of("GET", "POST").map(method -> Arguments.of(actor, method)));
     }
 
     @ParameterizedTest
     @MethodSource("deniedActorsAndMethods")
-    void residentEndpointsRemainAdministratorOnlyBeforeAnyWork(String actor, String method) throws Exception {
+    void residentEndpointsRequireAnApprovedPropertyOwnerBeforeAnyWork(String actor, String method) throws Exception {
         Snapshot before = snapshot();
         String token = switch (actor) {
             case "anonymous" -> null;
             case "guest" -> jwt.createAccessToken("GUEST_synthetic_resident", "guest");
             case "user" -> jwt.createAccessToken(fixture.otherId(), "user");
+            case "staff" -> {
+                User staff = user("resident-staff-" + fixture.buildingId(), UserRole.admin);
+                yield jwt.createAccessToken(staff.getUserId(), "admin");
+            }
             default -> jwt.createAccessToken(fixture.ownerId(), "tenant");
         };
         assertError(request(method, "POST".equals(method) ? json.writeValueAsString(validFields()) : null, token),
@@ -269,9 +276,9 @@ class ResidentCreationTransactionIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"GET", "POST"})
-    void aDemotedAdministratorCannotUseTheOldTokenForResidentEndpoints(String method) throws Exception {
+    void aRevokedOwnerCannotUseTheOldTokenForResidentEndpoints(String method) throws Exception {
         String oldToken = adminToken();
-        jdbc.update("UPDATE users SET user_role='user' WHERE user_id=?", fixture.adminId());
+        jdbc.update("UPDATE account_role_grants SET grant_state='REVOKED' WHERE user_id=? AND role_code='OWNER'", fixture.adminId());
         Snapshot before = snapshot();
         assertError(request(method, "POST".equals(method) ? json.writeValueAsString(validFields()) : null, oldToken),
                 ErrorCode.FORBIDDEN);
@@ -419,10 +426,10 @@ class ResidentCreationTransactionIntegrationTest {
                 .lessorAddr("Synthetic resident fixture address").lessorRrn("000000-0000000").build());
     }
 
-    private String adminToken() { return jwt.createAccessToken(fixture.adminId(), "admin"); }
+    private String adminToken() { return jwt.createAccessToken(fixture.adminId(), "owner"); }
 
     private Reply request(String method, String body, String token) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/admin/residents"))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/owner/residents"))
                 .timeout(Duration.ofSeconds(15)).header("Accept", "application/json");
         if (token != null) request.header("Authorization", "Bearer " + token);
         if (body != null) request.header("Content-Type", "application/json");

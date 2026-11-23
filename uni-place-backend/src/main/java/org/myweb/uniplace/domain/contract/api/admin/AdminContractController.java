@@ -4,7 +4,7 @@ import org.myweb.uniplace.domain.contract.api.dto.request.ContractAdminSearchReq
 import org.myweb.uniplace.domain.contract.api.dto.request.ContractUpdateRequest;
 import org.myweb.uniplace.domain.contract.api.dto.response.AdminContractSummaryResponse;
 import org.myweb.uniplace.domain.contract.api.dto.response.ContractResponse;
-import org.myweb.uniplace.domain.contract.application.ContractService;
+import org.myweb.uniplace.domain.contract.application.OwnerContractService;
 import org.myweb.uniplace.global.response.ApiResponse;
 import org.myweb.uniplace.global.response.PageResponse;
 
@@ -17,10 +17,10 @@ import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/admin/contracts")
+@RequestMapping("/owner/contracts")
 public class AdminContractController {
 
-    private final ContractService contractService;
+    private final OwnerContractService contractService;
 
     // ======================================
     // 관리자: 계약 목록 조회 (검색 + 페이징)
@@ -42,7 +42,7 @@ public class AdminContractController {
 
         Pageable pageable = PageRequest.of(page - 1, size, direction, sort);
 
-        var result = contractService.searchAdminContracts(request, pageable);
+        var result = contractService.search(request, pageable);
 
         return ApiResponse.ok(PageResponse.of(result));
     }
@@ -55,7 +55,7 @@ public class AdminContractController {
     public ApiResponse<ContractResponse> get(
             @PathVariable("contractId") Integer contractId
     ) {
-        return ApiResponse.ok(contractService.getContractForAdmin(contractId));
+        return ApiResponse.ok(contractService.get(contractId));
     }
 
     // ======================================
@@ -68,7 +68,7 @@ public class AdminContractController {
             @Validated @ModelAttribute ContractUpdateRequest request
     ) {
         return ApiResponse.ok(
-                contractService.updateContractForAdmin(contractId, request)
+                contractService.update(contractId, request)
         );
     }
 }

@@ -8,6 +8,7 @@ import org.myweb.uniplace.domain.ai.application.gateway.AiGateway;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayRequest;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayResponse;
 import org.myweb.uniplace.domain.ai.domain.AiIntent;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.review.api.dto.response.ReviewResponse;
 import org.myweb.uniplace.domain.review.application.ReviewService;
 import org.myweb.uniplace.domain.review.repository.ReviewRepository;
@@ -21,13 +22,16 @@ public class ReviewInfoUseCase extends AbstractForwardUseCase {
 
     private final ReviewService    reviewService;
     private final ReviewRepository reviewRepository;
+    private final OwnershipAccess ownership;
 
     public ReviewInfoUseCase(AiGateway aiGateway,
                              ReviewService reviewService,
-                             ReviewRepository reviewRepository) {
+                             ReviewRepository reviewRepository,
+                             OwnershipAccess ownership) {
         super(aiGateway);
         this.reviewService    = reviewService;
         this.reviewRepository = reviewRepository;
+        this.ownership = ownership;
     }
 
     @Override
@@ -54,7 +58,7 @@ public class ReviewInfoUseCase extends AbstractForwardUseCase {
         // ── 정렬 ──────────────────────────────────────────────────────
         String sortBy    = strSlot(slots, "sort_by");
         String sortOrder = strSlot(slots, "sort_order");
-        int    limit     = intSlot(slots, "limit", 10);
+        int    limit     = Math.max(1, Math.min(intSlot(slots, "limit", 10), 50));
 
         Sort sort = buildSort(sortBy, sortOrder);
         PageRequest pageable = PageRequest.of(0, limit, sort);
@@ -64,6 +68,9 @@ public class ReviewInfoUseCase extends AbstractForwardUseCase {
         Integer minRating  = intObjSlot(slots, "min_rating", "minRating");
         Integer maxRating  = intObjSlot(slots, "max_rating", "maxRating");
         String  buildingNm = strSlot(slots, "building_nm", "buildingNm");
+        if (roomId != null) ownership.requirePublicRoom(roomId);
+        var publicRoomIds = ownership.publicRoomIds();
+        if (publicRoomIds.isEmpty()) return List.of();
 
         // 단순 roomId 조회(필터/정렬 없음) → 기존 서비스 활용
         boolean hasFilter = roomId != null || minRating != null || maxRating != null
@@ -71,7 +78,7 @@ public class ReviewInfoUseCase extends AbstractForwardUseCase {
 
         List<ReviewResponse> reviews;
         if (hasFilter || sortBy != null) {
-            reviews = reviewRepository.searchWithFilters(roomId, minRating, maxRating,
+            reviews = reviewRepository.searchPublishedWithFilters(publicRoomIds, roomId, minRating, maxRating,
                             buildingNm, pageable)
                         .stream()
                         .map(e -> ReviewResponse.fromEntity(e, null))

@@ -525,7 +525,7 @@ function ContractCard({ contract, noOverlay = false }) {
               <div className={styles.contractPending}>
                 {contract.contractStatus === 'requested' ||
                 contract.contractStatus === 'approved'
-                  ? '⏳ 관리자 승인 후 계약서가 발급됩니다.'
+                  ? '⏳ 소유주 승인 후 계약서를 확인할 수 있습니다.'
                   : '📄 계약서 준비 중입니다.'}
               </div>
             )}

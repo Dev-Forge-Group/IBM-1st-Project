@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.contract.api;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -150,6 +152,8 @@ class ContractCreateValidationIntegrationTest {
             Building building = building(buildings);
             User owner = user(users, "create-test-" + building.getBuildingId());
             Room room = room(rooms, building);
+            User operator = user(users, "create-operator-" + building.getBuildingId());
+            grantRentalOwner(jdbc, operator.getUserId(), building.getBuildingId(), room.getRoomId(), null);
             LocalDate start = LocalDate.now(KST).plusDays(2);
             return new Fixture(owner.getUserId(), room.getRoomId(), start, start.plusMonths(1));
         });
@@ -260,7 +264,7 @@ class ContractCreateValidationIntegrationTest {
         };
         ErrorCode expected = switch (actor) {
             case "anonymous" -> ErrorCode.UNAUTHORIZED;
-            case "guest" -> ErrorCode.USER_NOT_FOUND;
+            case "guest" -> ErrorCode.FORBIDDEN;
             case "expired" -> ErrorCode.TOKEN_EXPIRED;
             default -> ErrorCode.TOKEN_TYPE_INVALID;
         };
@@ -341,8 +345,10 @@ class ContractCreateValidationIntegrationTest {
         assertThat(after.role()).isEqualTo(before.role());
         verify(storage, times(1)).store(any(MultipartFile.class), eq(signature.getFilePath()), eq(signature.getRenameFilename()));
         verify(images, times(1)).generateAndSave(any(Contract.class));
-        verify(notifications, times(1)).notifyAdmins(eq("CONTRACT_REQ"), anyString(), isNull(),
-                eq(TargetType.contract), isNull(), eq("/admin/contracts"));
+        verify(notifications, times(1)).notifyUser(eq("create-operator-" + jdbc.queryForObject(
+                "SELECT building_id FROM rooms WHERE room_id=?", Integer.class, fixture.roomId())),
+                eq("CONTRACT_REQ"), anyString(), isNull(), eq(TargetType.contract), eq(contractId),
+                eq("/owner/contracts?contractId=" + contractId));
         verify(slack, times(1)).send(anyString());
         verifyNoMoreInteractions(storage, images, notifications, slack);
     }
@@ -446,7 +452,7 @@ class ContractCreateValidationIntegrationTest {
     static void optionalBrowserFixture(@Autowired UserRepository users, @Autowired BuildingRepository buildings,
             @Autowired RoomRepository rooms, @Autowired UploadFileRepository files, @Autowired StorageService storage,
             @Autowired ContractImageService images, @Autowired PlatformTransactionManager transactions,
-            @Autowired ObjectMapper json, @LocalServerPort int port) throws Exception {
+            @Autowired ObjectMapper json, @Autowired JdbcTemplate jdbc, @LocalServerPort int port) throws Exception {
         try {
             String target = System.getenv("UNIPLACE_CONTRACT_CREATE_BROWSER_READY");
             if (target == null || target.isBlank()) return;
@@ -455,6 +461,8 @@ class ContractCreateValidationIntegrationTest {
                 User owner = user(users, "create-browser-owner");
                 Building building = building(buildings);
                 Room room = room(rooms, building);
+                User operator = user(users, "create-browser-operator");
+                grantRentalOwner(jdbc, operator.getUserId(), building.getBuildingId(), room.getRoomId(), null);
                 return Map.<String, Object>of("baseUrl", "http://127.0.0.1:" + port + "/api",
                         "ownerId", owner.getUserId(), "roomId", room.getRoomId(), "buildingId", building.getBuildingId());
             });

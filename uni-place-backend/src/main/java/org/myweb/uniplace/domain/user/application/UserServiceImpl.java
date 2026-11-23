@@ -2,6 +2,8 @@ package org.myweb.uniplace.domain.user.application;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.myweb.uniplace.domain.ownership.application.publicapi.AccountAccess;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.notification.application.NotificationService;
 import org.myweb.uniplace.domain.notification.domain.enums.NotificationType;
 import org.myweb.uniplace.domain.notification.domain.enums.TargetType;
@@ -49,13 +51,14 @@ public class UserServiceImpl implements UserService {
     private final SocialAccountRepository socialAccountRepository;
     private final PasswordEncoder passwordEncoder;
     private final NotificationService notificationService;
+    private final OwnershipAccess ownershipAccess;
 
     @Override
     @Transactional(readOnly = true)
     public UserResponse me(String userId) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
-        return UserResponse.from(user);
+        return accountResponse(user);
     }
 
     @Override
@@ -157,17 +160,27 @@ public class UserServiceImpl implements UserService {
 
         notifyIfChanged(user, emailChanged, telChanged, pwdChanged);
 
-        return UserResponse.from(user);
+        return accountResponse(user);
     }
     
     @Override
     @Transactional(readOnly = true)
     public Page<UserResponse> listForAdmin(Pageable pageable, UserRole role) {
-    	Page<User> page = (role == null)
-                ? userRepository.findAll(pageable)
-                : userRepository.findByUserRole(role, pageable);
+        Page<User> page;
+        if (role == null) {
+            page = userRepository.findAll(pageable);
+        } else {
+            page = switch (role) {
+                case admin -> userRepository.findByAccountKindAndUserRole(
+                        org.myweb.uniplace.domain.user.domain.enums.AccountKind.STAFF, UserRole.admin, pageable);
+                case user -> userRepository.findByAccountKind(
+                        org.myweb.uniplace.domain.user.domain.enums.AccountKind.MEMBER, pageable);
+                case tenant -> userRepository.findCurrentTenantMembers(
+                        java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")), pageable);
+            };
+        }
 
-        return page.map(UserResponse::from);
+        return page.map(this::accountResponse);
     }
 
     @Override
@@ -175,7 +188,7 @@ public class UserServiceImpl implements UserService {
     public UserResponse getByIdForAdmin(String userId) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
-        return UserResponse.from(user);
+        return accountResponse(user);
     }
 
     @Override
@@ -188,6 +201,8 @@ public class UserServiceImpl implements UserService {
 
         String before = user.getUserSt() == null ? "-" : user.getUserSt().name();
         user.changeStatus(req.getUserSt());
+        // The effective-access resolver reads SQL directly and must see this transaction's change.
+        userRepository.flush();
         String after = user.getUserSt() == null ? "-" : user.getUserSt().name();
         String actorAdminId = currentActorId();
         safeNotifyAdmins(
@@ -207,7 +222,7 @@ public class UserServiceImpl implements UserService {
         };
         safeNotify(user.getUserId(), NotificationType.ADM_USER_STATUS_CHG.name(), statusMsg);
         detectBulkAdminChange(actorAdminId, "STATUS");
-        return UserResponse.from(user);
+        return accountResponse(user);
     }
 
     @Override
@@ -218,8 +233,15 @@ public class UserServiceImpl implements UserService {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
+        AccountAccess access = ownershipAccess.effectiveAccess(userId);
+        if (req.getUserRole() == UserRole.tenant
+                || (req.getUserRole() == UserRole.admin && !"STAFF".equals(access.accountKind()))) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST);
+        }
+
         String before = user.getUserRole() == null ? "-" : user.getUserRole().name();
         user.changeRole(req.getUserRole());
+        userRepository.flush();
         String after = user.getUserRole() == null ? "-" : user.getUserRole().name();
         String actorAdminId = currentActorId();
         safeNotifyAdmins(
@@ -232,7 +254,12 @@ public class UserServiceImpl implements UserService {
             "/admin/users/" + user.getUserId()
         );
         detectBulkAdminChange(actorAdminId, "ROLE");
-        return UserResponse.from(user);
+        return accountResponse(user);
+    }
+
+    private UserResponse accountResponse(User user) {
+        AccountAccess access = ownershipAccess.effectiveAccess(user.getUserId());
+        return UserResponse.from(user, access.accountKind(), access.roles(), access.ownerStatus());
     }
 
     @Override

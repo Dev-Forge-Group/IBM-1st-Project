@@ -13,11 +13,11 @@ import org.myweb.uniplace.domain.ai.application.gateway.AiGateway;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayRequest;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayResponse;
 import org.myweb.uniplace.domain.ai.domain.AiIntent;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.commerce.api.dto.response.ProductWithBuildingStockResponse;
 import org.myweb.uniplace.domain.commerce.application.ProductService;
 import org.myweb.uniplace.domain.payment.domain.entity.Payment;
 import org.myweb.uniplace.domain.payment.repository.PaymentRepository;
-import org.myweb.uniplace.domain.property.domain.entity.Building;
 import org.myweb.uniplace.domain.property.repository.BuildingRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,17 +30,20 @@ public class PaymentOrderSuggestionUseCase extends AbstractForwardUseCase {
     private final ProductService productService;
     private final PaymentRepository paymentRepository;
     private final BuildingRepository buildingRepository;
+    private final OwnershipAccess ownership;
 
     public PaymentOrderSuggestionUseCase(
         AiGateway aiGateway,
         ProductService productService,
         PaymentRepository paymentRepository,
-        BuildingRepository buildingRepository
+        BuildingRepository buildingRepository,
+        OwnershipAccess ownership
     ) {
         super(aiGateway);
         this.productService = productService;
         this.paymentRepository = paymentRepository;
         this.buildingRepository = buildingRepository;
+        this.ownership = ownership;
     }
 
     @Override
@@ -53,6 +56,7 @@ public class PaymentOrderSuggestionUseCase extends AbstractForwardUseCase {
 
         String userId = firstNonBlank(request.getUserId(), stringSlot(slots, "userId", "user_id"));
         Integer buildingId = intSlot(slots, "buildingId", "building_id");
+        if (buildingId != null) ownership.requirePublicBuilding(buildingId);
         YearMonth month = parseYearMonth(firstNonBlank(stringSlot(slots, "month"), currentMonthText()));
 
         if (!hasSlot(slots, "month")) {
@@ -67,8 +71,6 @@ public class PaymentOrderSuggestionUseCase extends AbstractForwardUseCase {
             buildingRepository.findById(buildingId).ifPresent(b -> {
                 slots.put("building_nm", b.getBuildingNm());
                 slots.put("building_addr", b.getBuildingAddr());
-                slots.put("lessor_nm", b.getBuildingLessorNm());
-                slots.put("lessor_tel", b.getBuildingLessorTel());
             });
         }
 
@@ -97,6 +99,7 @@ public class PaymentOrderSuggestionUseCase extends AbstractForwardUseCase {
             }
             for (Map.Entry<Integer, Integer> stock : product.getBuildingStocks().entrySet()) {
                 Integer currentBuildingId = stock.getKey();
+                if (!ownership.isPublicBuilding(currentBuildingId)) continue;
                 if (buildingId != null && !buildingId.equals(currentBuildingId)) {
                     continue;
                 }

@@ -9,6 +9,7 @@ import org.myweb.uniplace.domain.ai.application.gateway.AiGateway;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayRequest;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayResponse;
 import org.myweb.uniplace.domain.ai.domain.AiIntent;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.commerce.api.dto.response.ProductWithBuildingStockResponse;
 import org.myweb.uniplace.domain.commerce.application.ProductService;
 import org.springframework.stereotype.Component;
@@ -18,10 +19,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class RoomServiceStockUseCase extends AbstractForwardUseCase {
 
     private final ProductService productService;
+    private final OwnershipAccess ownership;
 
-    public RoomServiceStockUseCase(AiGateway aiGateway, ProductService productService) {
+    public RoomServiceStockUseCase(AiGateway aiGateway, ProductService productService, OwnershipAccess ownership) {
         super(aiGateway);
         this.productService = productService;
+        this.ownership = ownership;
     }
 
     @Override
@@ -52,6 +55,7 @@ public class RoomServiceStockUseCase extends AbstractForwardUseCase {
 
     private List<Map<String, Object>> fetchStockItems(Map<String, Object> slots) {
         Integer buildingId = intSlot(slots, "buildingId", "building_id");
+        if (buildingId != null) ownership.requirePublicBuilding(buildingId);
         Integer prodId = intSlot(slots, "prodId", "prod_id");
         String prodNm = stringSlot(slots, "prodNm", "prod_nm");
         String loweredProdNm = prodNm == null ? null : prodNm.toLowerCase();
@@ -83,6 +87,7 @@ public class RoomServiceStockUseCase extends AbstractForwardUseCase {
             }
 
             for (Map.Entry<Integer, Integer> entry : stockMap.entrySet()) {
+                if (!ownership.isPublicBuilding(entry.getKey())) continue;
                 items.add(toItem(entry.getKey(), product, entry.getValue()));
             }
         }

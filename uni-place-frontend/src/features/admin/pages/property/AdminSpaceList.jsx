@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { adminApi } from '../../api/adminApi';
+import { ownerApi as adminApi } from '../../../owner/api/ownerApi';
 import AdminPropertyListTable from './AdminPropertyListTable';
 import AdminSpaceModal from './AdminSpaceModal';
 import styles from './AdminPropertyListTable.module.css';
@@ -22,6 +22,8 @@ export default function AdminSpaceList() {
   );
 
   const columns = [
+    { key: 'ownershipStatus', label: '소유 관계', render: (row) => ({ ACTIVE: '확인 완료', PENDING: '확인 중', INHERITED: '건물 권한 적용', REJECTED: '반려', REVOKED: '권한 회수', UNASSIGNED: '미확인' }[row.ownershipStatus] || row.ownershipStatus || '-') },
+    { key: 'publicVisible', label: '공개 상태', render: (row) => row.publicVisible ? '공개' : '확인 후 공개' },
     { key: 'spaceId', label: '공간 ID' },
     { key: 'buildingNm', label: '건물명' },
     { key: 'spaceNm', label: '공간명' },

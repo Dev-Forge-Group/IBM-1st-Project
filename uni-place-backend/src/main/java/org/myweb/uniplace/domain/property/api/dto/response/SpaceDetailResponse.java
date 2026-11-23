@@ -1,6 +1,8 @@
 // 경로: org/myweb/uniplace/domain/property/api/dto/response/SpaceDetailResponse.java
 package org.myweb.uniplace.domain.property.api.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.List;
 
 import org.myweb.uniplace.domain.file.api.dto.response.FileResponse;
@@ -12,7 +14,7 @@ import lombok.*;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
+@Builder(toBuilder = true)
 public class SpaceDetailResponse {
 
     private Integer spaceId;
@@ -33,6 +35,20 @@ public class SpaceDetailResponse {
 
     // 상세 이미지들 (프론트에서 img src={viewUrl})
     private List<FileResponse> files;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String ownershipStatus;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean publicVisible;
+
+    public SpaceDetailResponse withPublicVisibility(boolean visible) {
+        return toBuilder().publicVisible(visible).build();
+    }
+
+    public SpaceDetailResponse withOwnershipStatus(String status) {
+        return toBuilder().ownershipStatus(status).build();
+    }
 
     public static SpaceDetailResponse fromEntity(CommonSpace e, List<FileResponse> files) {
 

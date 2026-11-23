@@ -117,8 +117,12 @@ function ContractDownloadButton({ fileId }) {
   );
 }
 
-export default function AdminContractList() {
-  const [searchParams] = useSearchParams();
+export default function AdminContractList({ api = adminApi } = {}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkId = Number(searchParams.get('contractId'));
+  const linkedContractId = Number.isInteger(linkId) && linkId > 0 && linkId <= 2147483647
+    ? linkId : null;
+  const openedNotification = useRef(null);
   const [portalRoot, setPortalRoot] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -161,11 +165,15 @@ export default function AdminContractList() {
     setLoading(true);
     setError('');
     try {
-      const res = await adminApi.getContracts({
+      const filters = linkedContractId ? { contractId: linkedContractId } : {
         ...filter,
-        ...query,
         buildingId: filter.buildingId ? Number(filter.buildingId) : undefined,
         roomNo: filter.roomNo ? Number(filter.roomNo) : undefined,
+      };
+      const res = await api.getContracts({
+        ...filters,
+        ...query,
+        page: linkedContractId ? 1 : query.page,
       });
 
       setItems(res?.content ?? []);
@@ -176,7 +184,7 @@ export default function AdminContractList() {
     } finally {
       setLoading(false);
     }
-  }, [filter, query]);
+  }, [api, filter, linkedContractId, query]);
 
   useEffect(() => {
     setPortalRoot(document.body);
@@ -188,9 +196,7 @@ export default function AdminContractList() {
 
   useEffect(() => {
     const params = new URLSearchParams(searchKey);
-    const contractId = (params.get('contractId') || '').trim();
-    const keyword = (params.get('keyword') || '').trim();
-    const nextKeyword = contractId || keyword;
+    const nextKeyword = (params.get('keyword') || '').trim();
     if (!nextKeyword) return;
     setFilter((prev) =>
       prev.keyword === nextKeyword ? prev : { ...prev, keyword: nextKeyword }
@@ -209,7 +215,7 @@ export default function AdminContractList() {
     setEditStatus('');
 
     try {
-      const res = await adminApi.getContractById(contractId);
+      const res = await api.getContractById(contractId);
       setDetail(res);
 
       // ✅ 서버 값으로 기본 세팅
@@ -221,21 +227,26 @@ export default function AdminContractList() {
     } finally {
       setDetailLoading(false);
     }
-  }, []);
+  }, [api]);
 
   useEffect(() => {
-    const params = new URLSearchParams(searchKey);
-    const contractIdNum = Number(params.get('contractId'));
-    if (!Number.isFinite(contractIdNum) || contractIdNum <= 0) return;
-    if (loading || detailModal) return;
-
-    const hit = items.find(
-      (item) => Number(item.contractId) === Math.trunc(contractIdNum)
-    );
-    if (hit) openDetail(Math.trunc(contractIdNum));
-  }, [detailModal, items, loading, openDetail, searchKey]);
+    if (!linkedContractId) {
+      openedNotification.current = null;
+      return;
+    }
+    if (loading || detailModal || openedNotification.current === linkedContractId) return;
+    if (items.some((item) => Number(item.contractId) === linkedContractId)) {
+      openedNotification.current = linkedContractId;
+      openDetail(linkedContractId);
+    }
+  }, [detailModal, items, linkedContractId, loading, openDetail]);
 
   const closeDetail = () => {
+    if (linkedContractId) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('contractId');
+      setSearchParams(nextParams, { replace: true });
+    }
     setDetailModal(null);
     setDetail(null);
     setEditStatus('');
@@ -266,14 +277,14 @@ export default function AdminContractList() {
     setSaveLoading(true);
     try {
       // ✅ 백엔드 ContractUpdateRequest 필드명 그대로
-      await adminApi.updateContract(detailModal, {
+      await api.updateContract(detailModal, {
         contractStatus: editStatus || undefined,
         moveinAt: editMoveinAt || undefined, // datetime-local 값 그대로 전송
         pdfFile: editPdfFile || undefined,
       });
 
       // 저장 후 상세 재조회 + 목록 갱신
-      const refreshed = await adminApi.getContractById(detailModal);
+      const refreshed = await api.getContractById(detailModal);
       setDetail(refreshed);
       setEditStatus(refreshed?.contractStatus ?? '');
       setEditMoveinAt(toDatetimeLocal(refreshed?.moveinAt));

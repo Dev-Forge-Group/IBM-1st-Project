@@ -4,6 +4,7 @@ package org.myweb.uniplace.domain.review.application;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.myweb.uniplace.domain.file.api.dto.request.FileUploadRequest;
 import org.myweb.uniplace.domain.file.api.dto.response.FileResponse;
@@ -13,6 +14,7 @@ import org.myweb.uniplace.domain.notification.domain.enums.NotificationType;
 import org.myweb.uniplace.domain.notification.domain.enums.TargetType;
 import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.domain.property.repository.RoomRepository;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.contract.application.publicapi.ReviewContractHistory;
 import org.myweb.uniplace.domain.review.api.dto.request.ReviewCreateRequest;
 import org.myweb.uniplace.domain.review.api.dto.request.ReviewUpdateRequest;
@@ -33,6 +35,7 @@ import org.myweb.uniplace.domain.ai.application.moderation.BannedWordService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,6 +58,7 @@ public class ReviewServiceImpl implements ReviewService {
     private final NotificationService notificationService;
     private final UserRepository userRepository;
     private final BannedWordService bannedWordService;
+    private final OwnershipAccess ownershipAccess;
 
     // ─────────────────────────────────────────────────────────────────────
     // 조회
@@ -63,8 +67,8 @@ public class ReviewServiceImpl implements ReviewService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<ReviewResponse> getAllReviews(Pageable pageable) {
-        Pageable pageReq = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
-        Page<Review> page = reviewRepository.findAllByOrderByReviewIdDesc(pageReq);
+        Pageable pageReq = newestFirst(pageable);
+        Page<Review> page = publicReviewPage(null, pageReq);
 
         List<Integer> reviewIds = page.map(Review::getReviewId).getContent();
 
@@ -97,8 +101,9 @@ public class ReviewServiceImpl implements ReviewService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<ReviewResponse> getReviewListByRoom(Integer roomId, Pageable pageable) {
-        Pageable pageReq = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
-        Page<Review> page = reviewRepository.findByRoomIdOrderByReviewIdDesc(roomId, pageReq);
+        ownershipAccess.requirePublicRoom(roomId);
+        Pageable pageReq = newestFirst(pageable);
+        Page<Review> page = publicReviewPage(roomId, pageReq);
 
         Room room = roomRepository.findById(roomId).orElse(null);
 
@@ -137,7 +142,9 @@ public class ReviewServiceImpl implements ReviewService {
         User author = userRepository.findById(userId).orElse(null);
         Page<ReviewResponse> mapped = page.map(r -> {
             List<FileResponse> files = loadThumbnailOnly(r);
-            Room room = roomRepository.findById(r.getRoomId()).orElse(null);
+            // Retain the author's review history without exposing the room's current private metadata.
+            Room room = ownershipAccess.isPublicRoom(r.getRoomId())
+                    ? roomRepository.findById(r.getRoomId()).orElse(null) : null;
             return ReviewResponse.fromEntity(r, files, room, author);
         });
 
@@ -148,6 +155,9 @@ public class ReviewServiceImpl implements ReviewService {
     @Transactional
     public ReviewResponse getReviewDetail(int reviewId, boolean increaseReadCount) {
         Review review = findReviewOrThrow(reviewId);
+        if (!ownershipAccess.isPublicRoom(review.getRoomId())) {
+            throw new BusinessException(ErrorCode.REVIEW_NOT_FOUND);
+        }
 
         // 조회수 증가 + 응답에 즉시 반영 (DB flush 후 재조회 없이 +1 계산)
         int currentReadCount = review.getReadCount();
@@ -214,6 +224,7 @@ public class ReviewServiceImpl implements ReviewService {
     @Override
     @Transactional(readOnly = true)
     public ReviewRoomSummaryResponse getRoomReviewSummary(Integer roomId) {
+        ownershipAccess.requirePublicRoom(roomId);
         double avg = reviewRepository.avgRatingByRoomId(roomId);
         long count = reviewRepository.countByRoomId(roomId);
         double rounded = Math.round(avg * 10.0) / 10.0;
@@ -330,6 +341,16 @@ public class ReviewServiceImpl implements ReviewService {
     // ─────────────────────────────────────────────────────────────────────
     // helpers
     // ─────────────────────────────────────────────────────────────────────
+
+    private Pageable newestFirst(Pageable pageable) {
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(Sort.Direction.DESC, "reviewId"));
+    }
+
+    private Page<Review> publicReviewPage(Integer roomId, Pageable pageable) {
+        Set<Integer> publicRoomIds = ownershipAccess.publicRoomIds();
+        if (publicRoomIds.isEmpty()) return Page.empty(pageable);
+        return reviewRepository.searchPublishedWithFilters(publicRoomIds, roomId, null, null, null, pageable);
+    }
 
     private List<FileResponse> loadThumbnailOnly(Review r) {
         if (!"Y".equalsIgnoreCase(r.getFileCk())) return Collections.emptyList();

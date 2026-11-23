@@ -1,6 +1,7 @@
 // features/file/components/FileUploader.jsx
 import React, { useRef } from 'react';
 import { toApiImageUrl } from '../api/fileApi';
+import AuthorizedPropertyImage from '../../owner/components/AuthorizedPropertyImage';
 import styles from './FileUploader.module.css';
 
 export default function FileUploader({
@@ -17,6 +18,7 @@ export default function FileUploader({
   maxCount = 10,
   accept = 'image/*',
   label = '이미지',
+  authenticatedExisting = false,
 }) {
   const inputRef = useRef(null);
   const dragSrc = useRef(null);
@@ -86,10 +88,10 @@ export default function FileUploader({
                   title={marked ? '클릭하면 삭제 취소' : '클릭하면 삭제 표시'}
                 >
                   <div className={styles.thumb}>
-                    <img
+                    {authenticatedExisting ? <AuthorizedPropertyImage fileId={f.fileId} alt={f.originFilename} /> : <img
                       src={toApiImageUrl(f.viewUrl || f.adminViewUrl)}
                       alt={f.originFilename}
-                    />
+                    />}
                     {marked && <div className={styles.deleteOverlay}>삭제</div>}
                   </div>
                   {isThumbnail && (

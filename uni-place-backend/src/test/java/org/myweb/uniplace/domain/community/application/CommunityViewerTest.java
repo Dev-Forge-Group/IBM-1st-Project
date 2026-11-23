@@ -29,4 +29,13 @@ class CommunityViewerTest {
 
         assertThat(CommunityViewer.current()).isEqualTo(new CommunityViewer(null, false));
     }
+
+    @Test
+    void anAuthenticatedAccountAdministratorCannotIdentifyAnonymousAuthors() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(new AuthUser("staff", "admin"), null,
+                        java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ADMIN"))));
+
+        assertThat(CommunityViewer.current()).isEqualTo(new CommunityViewer("staff", false));
+    }
 }

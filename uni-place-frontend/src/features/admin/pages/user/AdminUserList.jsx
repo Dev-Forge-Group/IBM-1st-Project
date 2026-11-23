@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { adminApi } from '../../api/adminApi';
+import { accountRoles, isStaffAccount } from '../../../../shared/auth/accountAccess';
 import ErrorActionNotice from '../../../../shared/components/ErrorActionNotice/ErrorActionNotice';
 import styles from '../reservation/AdminReservation.module.css'; // ✅ 투어 예약과 동일 스타일 사용
 
@@ -12,9 +13,8 @@ const USER_STATUS_OPTIONS = [
 ];
 
 const USER_ROLE_OPTIONS = [
-  { value: 'user', label: 'user' },
-  { value: 'tenant', label: 'tenant' },
-  { value: 'admin', label: 'admin' },
+  { value: 'admin', label: '계정 관리 권한 사용' },
+  { value: 'user', label: '계정 관리 권한 해제' },
 ];
 
 const STATUS_LABELS = {
@@ -86,7 +86,7 @@ export default function AdminUserList() {
       const res = await adminApi.getUserDetail(userId);
       setDetail(res);
       setStatusValue(res?.userSt ?? 'ACTIVE');
-      setRoleValue(res?.userRole ?? 'USER');
+      setRoleValue('');
     } catch (e) {
       alert(e?.message || '회원 상세 조회 실패');
       setDetailModal(null);
@@ -110,7 +110,7 @@ export default function AdminUserList() {
       if (statusValue) {
         await adminApi.updateUserStatus(detailModal.userId, statusValue);
       }
-      if (roleValue) {
+      if (isStaffAccount(detail) && roleValue && roleValue !== String(detail?.userRole).toLowerCase()) {
         await adminApi.updateUserRole(detailModal.userId, roleValue);
       }
       closeDetail();
@@ -127,18 +127,8 @@ export default function AdminUserList() {
     [totalPages]
   );
 
-  const normalizeRole = (v) =>
-    String(v ?? '')
-      .trim()
-      .toLowerCase();
-
-  const filteredItems = useMemo(() => {
-    if (query.role === 'all') return items;
-
-    return items.filter(
-      (u) => normalizeRole(u.userRole) === normalizeRole(query.role)
-    );
-  }, [items, query.role]);
+  // The server filters effective roles before pagination; legacy aliases cannot re-filter this page.
+  const filteredItems = items;
   const guideError = errorCause ?? error;
 
   return (
@@ -174,6 +164,7 @@ export default function AdminUserList() {
       {/* 필터 */}
       <div className={styles.filterBar}>
         <select
+          aria-label="페이지당 계정 수"
           className={styles.filterSelect}
           value={query.size}
           onChange={(e) =>
@@ -188,6 +179,7 @@ export default function AdminUserList() {
         </select>
 
         <select
+          aria-label="계정 정렬 순서"
           className={styles.filterSelect}
           value={query.direct}
           onChange={(e) =>
@@ -199,6 +191,7 @@ export default function AdminUserList() {
         </select>
 
         <select
+          aria-label="계정 유형·입주자 필터"
           className={styles.filterSelect}
           value={query.role}
           onChange={(e) =>
@@ -206,9 +199,9 @@ export default function AdminUserList() {
           }
         >
           <option value="all">권한</option>
-          <option value="user">회원</option>
-          <option value="tenant">입주자</option>
-          <option value="admin">관리자</option>
+          <option value="user">이용자 계정</option>
+          <option value="tenant">현재 입주자</option>
+          <option value="admin">계정 관리자</option>
         </select>
       </div>
 
@@ -232,7 +225,9 @@ export default function AdminUserList() {
                 <th>이름</th>
                 <th>이메일</th>
                 <th>전화번호</th>
+                <th>계정 유형</th>
                 <th>권한</th>
+                <th>소유주 확인</th>
                 <th>상태</th>
                 <th>관리</th>
               </tr>
@@ -244,7 +239,9 @@ export default function AdminUserList() {
                   <td className={styles.tdName}>{u.userNm ?? '-'}</td>
                   <td>{u.userEmail ?? '-'}</td>
                   <td>{u.userTel ?? '-'}</td>
-                  <td>{u.userRole ?? '-'}</td>
+                  <td>{isStaffAccount(u) ? '운영 계정' : '이용자 계정'}</td>
+                  <td>{accountRoles(u).join(', ') || '부여된 권한 없음'}</td>
+                  <td>{({ NONE: '신청 전', PENDING: '확인 중', APPROVED: '승인', REJECTED: '반려' })[u.ownerStatus] || '-'}</td>
                   <td>
                     <StatusBadge status={u.userSt} />
                   </td>
@@ -353,8 +350,14 @@ export default function AdminUserList() {
                   </div>
 
                   <div className={styles.modalField}>
+                    <label className={styles.modalLabel}>계정 유형</label>
+                    <div>{isStaffAccount(detail) ? '운영 계정' : '이용자 계정'}</div>
+                  </div>
+
+                  <div className={styles.modalField}>
                     <label className={styles.modalLabel}>권한 변경</label>
-                    <div className={styles.statusBtnGroup}>
+                    <p>현재 권한: {accountRoles(detail).join(', ') || '부여된 권한 없음'}</p>
+                    {isStaffAccount(detail) ? <div className={styles.statusBtnGroup}>
                       {USER_ROLE_OPTIONS.map((o) => (
                         <button
                           key={o.value}
@@ -369,7 +372,7 @@ export default function AdminUserList() {
                           {o.label}
                         </button>
                       ))}
-                    </div>
+                    </div> : <p>소유주 권한은 소유주 신청 확인에서 관리하며, 입주자 기능은 유효한 계약에 따라 반영됩니다.</p>}
                   </div>
                 </>
               )}

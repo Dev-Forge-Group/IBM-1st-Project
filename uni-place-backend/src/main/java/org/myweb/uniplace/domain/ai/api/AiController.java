@@ -34,6 +34,7 @@ import org.myweb.uniplace.domain.ai.application.gateway.AiOrderFormDownloadProxy
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayRequest;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayResponse;
 import org.myweb.uniplace.domain.ai.domain.AiIntent;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.global.exception.BusinessException;
 import org.myweb.uniplace.global.exception.ErrorCode;
 import org.myweb.uniplace.global.response.ApiResponse;
@@ -51,8 +52,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.web.client.RestClient;
 
 @RestController
 @RequiredArgsConstructor
@@ -74,8 +73,7 @@ public class AiController {
     private final AiOrchestratorService aiOrchestratorService;
     private final ObjectMapper objectMapper;
     private final AiOrderFormDownloadProxy aiOrderFormDownloadProxy;
-    @Qualifier("aiRestClient")
-    private final RestClient aiRestClient;
+    private final OwnershipAccess ownership;
 
     @PostMapping("/chat")
     public ApiResponse<AiChatResponse> chat(@Valid @RequestBody AiChatRequest request) {
@@ -110,54 +108,17 @@ public class AiController {
         return ApiResponse.ok(AiChatResponse.from(response));
     }
 
-    /**
-     * 어드민 전용 챗봇.
-     *
-     * [보안]
-     * - @PreAuthorize("hasRole('ADMIN')") → ROLE_ADMIN 없으면 403 자동 반환
-     * - userId를 Spring Security에서 직접 추출 → 클라이언트 위조 불가
-     * - Python admin_tool_orchestrator로 라우팅 → 모든 테이블 접근 허용
-     */
-    @PreAuthorize("hasRole('ADMIN')")
+    /** Account administrators have no global business-data chatbot authority. */
+    @PreAuthorize("denyAll()")
     @PostMapping("/chat/admin-chatbot")
     public ApiResponse<AiChatResponse> adminChatbot(@RequestBody AiAgentChatbotRequest request) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        String adminId = auth.getName();   // JWT에서 추출 — 클라이언트 전달값 무시
-
-        // ✅ TypeReference 사용 — 제네릭 타입 안전하게 변환
-        Map<String, Object> slots = objectMapper.convertValue(request, new TypeReference<Map<String, Object>>() {});
-        slots.put("userId", adminId);      // 서버 측 userId 강제 주입
-
-        AiGatewayRequest gatewayReq = AiGatewayRequest.builder()
-            .intent(AiIntent.ADMIN_CHATBOT)
-            .userId(adminId)
-            .prompt(request.getPrompt())
-            .slots(slots)
-            .build();
-
-        // Python /api/v1/ai/chat/admin-chatbot 으로 포워딩
-        AiGatewayResponse response = aiOrchestratorService.handle(gatewayReq);
-        return ApiResponse.ok(AiChatResponse.from(response));
+        throw new BusinessException(ErrorCode.FORBIDDEN);
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("denyAll()")
     @GetMapping("/admin/stock-alerts")
     public ApiResponse<Map<String, Object>> adminStockAlerts(@RequestParam(name = "adminId", required = false) String adminId) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        String resolvedAdminId = (adminId != null && !adminId.isBlank())
-            ? adminId
-            : (auth != null ? auth.getName() : "");
-
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> response = aiRestClient.get()
-                .uri("/api/v1/ai/admin/stock-alerts?adminId={adminId}", resolvedAdminId)
-                .retrieve()
-                .body(Map.class);
-            return ApiResponse.ok(response != null ? response : Map.of("alert", null));
-        } catch (Exception e) {
-            return ApiResponse.ok(Map.of("alert", null));
-        }
+        throw new BusinessException(ErrorCode.FORBIDDEN);
     }
 
     @PostMapping("/chat/voice")
@@ -273,7 +234,7 @@ public class AiController {
      * GET /ai/proxy/market?lat=...&lon=...&radius=...&room_type=...&rent_type=...&size_sqm=...
      */
     @GetMapping("/proxy/market")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('OWNER')")
     public ApiResponse<Object> proxyMarketData(
             @RequestParam("lat") double lat,
             @RequestParam("lon") double lon,
@@ -441,14 +402,11 @@ public class AiController {
 
         Object principal = authentication.getPrincipal();
         if (principal instanceof AuthUser authUser) {
+            if (authUser.isStaff()) throw new BusinessException(ErrorCode.FORBIDDEN);
+            if ("MEMBER".equals(authUser.getAccountKind())) ownership.requireMember();
             return authUser.getUserId();
         }
-
-        String userId = authentication.getName();
-        if (userId == null || userId.isBlank() || "anonymousUser".equals(userId)) {
-            throw new BusinessException(ErrorCode.UNAUTHORIZED);
-        }
-        return userId;
+        throw new BusinessException(ErrorCode.UNAUTHORIZED);
     }
 
     private String resolveAuthenticatedRole() {
@@ -479,7 +437,7 @@ public class AiController {
         if ("guest".equalsIgnoreCase(role) && !GUEST_ALLOWED_INTENTS.contains(intent)) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
-        if (!"admin".equalsIgnoreCase(role) && AiIntent.ADMIN_CHATBOT.equals(intent)) {
+        if (AiIntent.ADMIN_CHATBOT.equals(intent)) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
     }

@@ -23,6 +23,7 @@ import lombok.Setter;
 @Builder
 public class RoomUpdateRequest {
 
+    private Integer buildingId;
     private String buildingNm;
 
     private Integer roomNo;

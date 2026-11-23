@@ -74,51 +74,39 @@ import ComplainDetail from './features/support/pages/ComplainDetail';
 import ComplainEdit from './features/support/pages/ComplainEdit';
 
 // ── 어드민 ────────────────────────────────────────────────────
-import RequireAuth from './app/router/guards/RequireAuth';
 import RequireRole from './app/router/guards/RequireRole';
+import RequireMember from './app/router/guards/RequireMember';
+import { isStaffAccount } from './shared/auth/accountAccess';
+import { ownerApi } from './features/owner/api/ownerApi';
+import OwnerShell from './features/owner/components/OwnerShell';
+import OwnerApplication from './features/owner/pages/OwnerApplication';
+import OwnerAssetClaims from './features/owner/pages/OwnerAssetClaims';
+import OwnerApprovalManagement from './features/owner/pages/OwnerApprovalManagement';
+import AdminContractList from './features/admin/pages/contract/AdminContractList';
 
 import AdminShell from './features/admin/components/AdminShell';
 import AdminInfo from './features/admin/pages/AdminInfo';
 
-import AdminMonthlyChargeList from './features/admin/pages/billing/AdminMonthlyChargeList';
-import AdminContractHub from './features/admin/pages/contract/AdminContractHub';
 import AdminResidentList from './features/admin/pages/contract/AdminResidentList';
 
-import AdminPayHub from './features/admin/pages/payment/AdminPayHub';
-import AdminPaymentList from './features/admin/pages/payment/AdminPaymentList';
-import AdminRefundList from './features/admin/pages/payment/AdminRefundList';
 
-import AdminOrderList from './features/admin/pages/commerce/AdminOrderList';
-import AdminProductList from './features/admin/pages/commerce/AdminProductList';
 
 import AdminPropertyHub from './features/admin/pages/property/AdminPropertyHub';
 import AdminBuildingList from './features/admin/pages/property/AdminBuildingList';
 import AdminRoomList from './features/admin/pages/property/AdminRoomList';
 import AdminSpaceList from './features/admin/pages/property/AdminSpaceList';
 
-import AdminReservationHub from './features/admin/pages/reservation/AdminReservationHub';
 import AdminTourReservationList from './features/admin/pages/reservation/AdminTourReservationList';
 import AdminSpaceReservationList from './features/admin/pages/reservation/AdminSpaceReservationList';
 
-import AdminRoomServiceHub from './features/admin/pages/roomservice/AdminRoomServiceHub';
-import AdminRoomServiceOrderList from './features/admin/pages/roomservice/AdminRoomServiceOrderList';
 
-import AdminSystemHub from './features/admin/pages/system/AdminSystemHub';
-import AdminAffiliateList from './features/admin/pages/system/AdminAffiliateList';
-import AdminBannerList from './features/admin/pages/system/AdminBannerList';
-import AdminCompanyInfoDetail from './features/admin/pages/system/AdminCompanyInfoDetail';
 
-import AdminUserHub from './features/admin/pages/user/AdminUserHub';
 import AdminUserList from './features/admin/pages/user/AdminUserList';
 
 // ── 건물 점검 (새로 추가) ──────────────────────────────────────
-import AdminInspectionList from './features/admin/pages/inspection/AdminInspectionList';
-import AdminInspectionDetail from './features/admin/pages/inspection/AdminInspectionDetail';
-import AdminOpenTickets from './features/admin/pages/inspection/AdminOpenTickets';
 
 // ── 챗봇 ──────────────────────────────────────────────────────
 import ChatBot from './features/chat/components/ChatBot';
-import AdminChatBot from './features/chat/components/AdminChatBot';
 
 // ── 법적고지 & SNS ────────────────────────────────────────
 import Terms from './shared/pages/Terms';
@@ -235,7 +223,6 @@ export default function App() {
         <Route path="/find-account" element={<FindAccount />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/oauth2/success" element={<OAuth2Success />} />
-        <Route path="/me" element={<MemberInfo />} />
 
         {/* ── Property ── */}
         <Route path="/rooms" element={<RoomList />} />
@@ -251,39 +238,25 @@ export default function App() {
         />
         <Route path="/membership" element={<Navigate to="/rooms" replace />} />
 
-        {/* ── 예약 ── */}
-        <Route
-          path="/reservations/space/create"
-          element={<SpaceReservationCreate />}
-        />
-        <Route
-          path="/reservations/space/list"
-          element={<SpaceReservationList />}
-        />
-        <Route
-          path="/reservations/tour/create"
-          element={<TourReservationCreate />}
-        />
-        <Route
-          path="/reservations/tour/list"
-          element={<TourReservationList />}
-        />
-
-        {/* ── 리뷰 ── */}
-        <Route path="/reviews/write" element={<ReviewWrite />} />
-        <Route path="/reviews/:reviewId/edit" element={<ReviewWrite />} />
-        <Route path="/reviews/my" element={<MyReviewsList />} />
+        <Route element={<RequireMember allowAnonymous />}>
+          <Route path="/reservations/tour/create" element={<TourReservationCreate />} />
+          <Route path="/reservations/tour/list" element={<TourReservationList />} />
+        </Route>
+        <Route element={<RequireMember />}>
+          <Route path="/me" element={<MemberInfo />} />
+          <Route path="/reservations/space/create" element={<SpaceReservationCreate />} />
+          <Route path="/reservations/space/list" element={<SpaceReservationList />} />
+          <Route path="/reviews/write" element={<ReviewWrite />} />
+          <Route path="/reviews/:reviewId/edit" element={<ReviewWrite />} />
+          <Route path="/reviews/my" element={<MyReviewsList />} />
+          <Route path="/contracts/apply" element={<ContractApply />} />
+          <Route path="/commerce/room-service" element={<ProductList />} />
+          <Route path="/commerce/cart" element={<Cart />} />
+          <Route path="/commerce/orders" element={<OrderList />} />
+          <Route path="/commerce/orders/:orderId" element={<OrderDetail />} />
+          <Route path="/commerce/checkout" element={<Checkout />} />
+        </Route>
         <Route path="/reviews/:reviewId" element={<MyReviewsDetail />} />
-
-        {/* ── 계약 ── */}
-        <Route path="/contracts/apply" element={<ContractApply />} />
-
-        {/* ── 커머스 ── */}
-        <Route path="/commerce/room-service" element={<ProductList />} />
-        <Route path="/commerce/cart" element={<Cart />} />
-        <Route path="/commerce/orders" element={<OrderList />} />
-        <Route path="/commerce/orders/:orderId" element={<OrderDetail />} />
-        <Route path="/commerce/checkout" element={<Checkout />} />
 
         {/* ── about ── */}
         <Route path="/about/company" element={<Company />} />
@@ -299,6 +272,7 @@ export default function App() {
           <Route path="faq" element={<FaqList />} />
           <Route path="notice" element={<NoticeList />} />
           <Route path="notice/:noticeId" element={<NoticeDetail />} />
+          <Route element={<RequireMember />}>
           <Route path="qna" element={<QnaList />} />
           <Route path="qna/write" element={<QnaWrite />} />
           <Route path="qna/:qnaId/edit" element={<QnaWrite />} />
@@ -307,81 +281,34 @@ export default function App() {
           <Route path="complain/write" element={<ComplainWrite />} />
           <Route path="complain/edit/:id" element={<ComplainEdit />} />
           <Route path="complain/:id" element={<ComplainDetail />} />
+          </Route>
         </Route>
 
-        {/* ── 어드민 ── */}
-        <Route element={<RequireAuth />}>
-          <Route element={<RequireRole allow={['admin']} />}>
-            <Route path="/admin" element={<AdminShell />}>
-              <Route index element={<AdminInfo />} />
-
-              <Route path="users" element={<AdminUserHub />}>
-                <Route index element={<AdminUserList />} />
-                <Route path="residents" element={<AdminResidentList />} />
-              </Route>
-
+        <Route element={<RequireRole allow={['ADMIN']} />}>
+          <Route path="/admin" element={<AdminShell />}>
+            <Route index element={<AdminInfo />} />
+            <Route path="users" element={<AdminUserList />} />
+            <Route path="owners" element={<OwnerApprovalManagement />} />
+            <Route path="*" element={<Navigate to="/admin" replace />} />
+          </Route>
+        </Route>
+        <Route element={<RequireMember />}>
+          <Route path="/owner" element={<OwnerShell />}>
+            <Route index element={<OwnerApplication />} />
+            <Route element={<RequireRole allow={['OWNER']} />}>
+              <Route path="claims" element={<OwnerAssetClaims />} />
               <Route path="property" element={<AdminPropertyHub />}>
+                <Route index element={<Navigate to="buildings" replace />} />
                 <Route path="buildings" element={<AdminBuildingList />} />
                 <Route path="rooms" element={<AdminRoomList />} />
                 <Route path="spaces" element={<AdminSpaceList />} />
-                <Route index element={<Navigate to="buildings" replace />} />
               </Route>
-
-              <Route path="reservations" element={<AdminReservationHub />}>
-                <Route path="tours" element={<AdminTourReservationList />} />
-                <Route path="spaces" element={<AdminSpaceReservationList />} />
-                <Route index element={<Navigate to="tours" replace />} />
-              </Route>
-
-              <Route path="contracts" element={<AdminContractHub />} />
-
-              <Route path="system" element={<AdminSystemHub />}>
-                <Route path="banners" element={<AdminBannerList />} />
-                <Route path="affiliates" element={<AdminAffiliateList />} />
-                <Route
-                  path="company_info"
-                  element={<AdminCompanyInfoDetail />}
-                />
-                <Route index element={<Navigate to="banners" replace />} />
-              </Route>
-
-              <Route path="roomservice" element={<AdminRoomServiceHub />}>
-                <Route
-                  path="room_orders"
-                  element={<AdminRoomServiceOrderList />}
-                />
-                <Route path="room_products" element={<AdminProductList />} />
-                <Route index element={<Navigate to="room_orders" replace />} />
-              </Route>
-
-              <Route path="support">
-                <Route index element={<Navigate to="complain" replace />} />
-                <Route path="complain" element={<ComplainList />} />
-                <Route path="complain/:id" element={<ComplainDetail />} />
-                <Route path="qna" element={<QnaList />} />
-                <Route path="qna/:qnaId" element={<QnaDetail />} />
-              </Route>
-
-              <Route path="pay" element={<AdminPayHub />}>
-                <Route path="billings" element={<AdminMonthlyChargeList />} />
-                <Route path="payments" element={<AdminPaymentList />} />
-                <Route path="refunds" element={<AdminRefundList />} />
-                <Route path="orders" element={<AdminOrderList />} />
-                <Route path="products" element={<AdminProductList />} />
-                <Route index element={<Navigate to="payments" replace />} />
-              </Route>
-
-              {/* ── 건물 점검 (새로 추가) ── */}
-              <Route path="inspections" element={<AdminInspectionList />} />
-              <Route
-                path="inspections/tickets"
-                element={<AdminOpenTickets />}
-              />
-              <Route
-                path="inspections/:inspectionId"
-                element={<AdminInspectionDetail />}
-              />
+              <Route path="contracts" element={<AdminContractList api={ownerApi} />} />
+              <Route path="residents" element={<AdminResidentList api={ownerApi} />} />
+              <Route path="reservations/tours" element={<AdminTourReservationList api={ownerApi} />} />
+              <Route path="reservations/spaces" element={<AdminSpaceReservationList api={ownerApi} />} />
             </Route>
+            <Route path="*" element={<Navigate to="/owner" replace />} />
           </Route>
         </Route>
 
@@ -397,19 +324,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      {/* 챗봇 — 어드민이면 AdminChatBot만, 일반 유저면 ChatBot만 */}
-      {user?.userRole === 'ADMIN' ||
-      user?.role === 'ADMIN' ||
-      user?.userRole === 'admin' ||
-      user?.role === 'admin' ? (
-        <AdminChatBot user={user} />
-      ) : (
-        <ChatBot
-          user={user}
-          geminiApiKey={GEMINI_API_KEY}
-          useBackend={USE_BACKEND_AI}
-        />
-      )}
+      {!isStaffAccount(user) && <ChatBot user={user} geminiApiKey={GEMINI_API_KEY} useBackend={USE_BACKEND_AI} />}
     </>
   );
 }

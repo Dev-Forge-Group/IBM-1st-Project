@@ -7,6 +7,7 @@ import org.myweb.uniplace.domain.ai.application.gateway.AiGateway;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayRequest;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayResponse;
 import org.myweb.uniplace.domain.ai.domain.AiIntent;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.property.repository.BuildingRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,10 +16,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentOrderFormCreateUseCase extends AbstractForwardUseCase {
 
     private final BuildingRepository buildingRepository;
+    private final OwnershipAccess ownership;
 
-    public PaymentOrderFormCreateUseCase(AiGateway aiGateway, BuildingRepository buildingRepository) {
+    public PaymentOrderFormCreateUseCase(AiGateway aiGateway, BuildingRepository buildingRepository, OwnershipAccess ownership) {
         super(aiGateway);
         this.buildingRepository = buildingRepository;
+        this.ownership = ownership;
     }
 
     @Override
@@ -34,11 +37,10 @@ public class PaymentOrderFormCreateUseCase extends AbstractForwardUseCase {
         if (rawBid != null) {
             try {
                 int bid = Integer.parseInt(String.valueOf(rawBid));
+                ownership.requirePublicBuilding(bid);
                 buildingRepository.findById(bid).ifPresent(b -> {
                     if (isBlank(slots.get("building_nm")))  slots.put("building_nm", b.getBuildingNm());
                     if (isBlank(slots.get("building_addr"))) slots.put("building_addr", b.getBuildingAddr());
-                    if (isBlank(slots.get("lessor_nm")))    slots.put("lessor_nm", b.getBuildingLessorNm());
-                    if (isBlank(slots.get("lessor_tel")))   slots.put("lessor_tel", b.getBuildingLessorTel());
                 });
             } catch (NumberFormatException ignored) {}
         }

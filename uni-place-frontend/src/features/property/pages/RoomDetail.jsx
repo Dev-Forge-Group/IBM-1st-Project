@@ -475,8 +475,9 @@ export default function RoomDetail() {
 
             {/* ── 계약하기 버튼 ── */}
             {(() => {
-              const canContract = room.roomSt === 'available';
-              const statusHint = {
+              const verifiedOwner = room.verifiedRentalOwner !== false;
+              const canContract = verifiedOwner && room.roomSt === 'available';
+              const statusHint = !verifiedOwner ? '소유 관계 확인 후 계약을 신청할 수 있습니다.' : {
                 reserved: '예약 중인 방입니다',
                 contracted: '계약 중인 방입니다',
                 repair: '수리 중인 방입니다',
@@ -504,8 +505,9 @@ export default function RoomDetail() {
 
             {/* ── 방 예약 버튼 ── */}
             {(() => {
-              const canTour = room.roomSt === 'available';
-              const tourBlockMsg = {
+              const verifiedOwner = room.verifiedRentalOwner !== false;
+              const canTour = verifiedOwner && room.roomSt === 'available';
+              const tourBlockMsg = !verifiedOwner ? '소유 관계 확인 후 방문을 예약할 수 있습니다.' : {
                 reserved: '예약 중인 방은 방문 예약이 불가합니다',
                 contracted: '계약 중인 방은 방문 예약이 불가합니다',
                 repair: '수리 중인 방은 방문 예약이 불가합니다',

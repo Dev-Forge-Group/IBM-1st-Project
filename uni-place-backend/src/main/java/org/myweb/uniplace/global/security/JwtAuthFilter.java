@@ -4,6 +4,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.myweb.uniplace.domain.ownership.application.publicapi.AccountAccess;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.user.domain.entity.User;
 import org.myweb.uniplace.domain.user.repository.UserRepository;
 import org.myweb.uniplace.global.exception.BusinessException;
@@ -20,10 +22,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtProvider jwtProvider;
     private final UserRepository userRepository;
+    private final OwnershipAccess ownershipAccess;
 
-    public JwtAuthFilter(JwtProvider jwtProvider, UserRepository userRepository) {
+    public JwtAuthFilter(JwtProvider jwtProvider, UserRepository userRepository, OwnershipAccess ownershipAccess) {
         this.jwtProvider = jwtProvider;
         this.userRepository = userRepository;
+        this.ownershipAccess = ownershipAccess;
     }
 
     @Override
@@ -64,12 +68,16 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             if (!user.canLogin() || user.getUserRole() == null) {
                 throw new BusinessException(ErrorCode.UNAUTHORIZED);
             }
-            AuthUser currentPrincipal = new AuthUser(user.getUserId(), user.getUserRole().name());
+            AccountAccess access = ownershipAccess.effectiveAccess(user.getUserId());
+            String displayRole = access.roles().contains("ADMIN") ? "admin"
+                    : access.roles().contains("TENANT") ? "tenant" : "user";
+            AuthUser currentPrincipal = new AuthUser(user.getUserId(), displayRole,
+                    access.accountKind(), access.roles(), access.ownerStatus());
             authentication = UsernamePasswordAuthenticationToken.authenticated(
                 currentPrincipal, null, currentPrincipal.getAuthorities());
         }
 
-        // 4) Publish the same current role to principal consumers and authorization checks.
+        // 4) Publish the same current capabilities to principal consumers and authorization checks.
         SecurityContextHolder.getContext().setAuthentication(authentication);
 
         filterChain.doFilter(request, response);

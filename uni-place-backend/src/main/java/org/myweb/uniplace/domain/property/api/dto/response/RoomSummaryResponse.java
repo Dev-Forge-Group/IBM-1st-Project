@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.property.api.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 
 import org.myweb.uniplace.domain.property.domain.entity.Building;
@@ -18,7 +20,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
+@Builder(toBuilder = true)
 public class RoomSummaryResponse {
 
     private Integer roomId;
@@ -49,6 +51,20 @@ public class RoomSummaryResponse {
 
     private Integer thumbnailFileId;
     private String thumbnailUrl;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String ownershipStatus;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean publicVisible;
+
+    public RoomSummaryResponse withPublicVisibility(boolean visible) {
+        return toBuilder().publicVisible(visible).build();
+    }
+
+    public RoomSummaryResponse withOwnershipStatus(String status) {
+        return toBuilder().ownershipStatus(status).build();
+    }
 
     public static RoomSummaryResponse fromEntity(Room e) {
 

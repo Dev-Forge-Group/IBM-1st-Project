@@ -1,5 +1,7 @@
 package org.myweb.uniplace.domain.reservation.application;
 
+import static org.myweb.uniplace.support.TestOwnershipFixtures.*;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -19,7 +21,11 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.myweb.uniplace.domain.contract.domain.entity.Contract;
+import org.myweb.uniplace.domain.contract.domain.entity.Resident;
+import org.myweb.uniplace.domain.contract.repository.ResidentRepository;
+import org.myweb.uniplace.domain.ownership.application.OwnershipAccessService;
 import org.myweb.uniplace.domain.contract.domain.enums.ContractStatus;
 import org.myweb.uniplace.domain.contract.repository.ContractRepository;
 import org.myweb.uniplace.domain.notification.application.NotificationService;
@@ -45,6 +51,8 @@ import org.myweb.uniplace.domain.user.repository.UserRepository;
 import org.myweb.uniplace.global.exception.BusinessException;
 import org.myweb.uniplace.global.exception.ErrorCode;
 import org.myweb.uniplace.global.security.AuthUser;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.myweb.uniplace.global.slack.SlackNotificationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -65,7 +73,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /** Two real caller transactions compete after opening their own repeatable-read snapshots. */
 @DataJpaTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({SpaceReservationServiceImpl.class, ReservationValidator.class, SpaceReservationConflictPolicyImpl.class})
+@Import({OwnershipAccessService.class, SpaceReservationServiceImpl.class, ReservationValidator.class, SpaceReservationConflictPolicyImpl.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Testcontainers
 class SpaceReservationConcurrencyIntegrationTest {
@@ -88,6 +96,7 @@ class SpaceReservationConcurrencyIntegrationTest {
     @Autowired BuildingRepository buildings;
     @Autowired RoomRepository rooms;
     @Autowired ContractRepository contracts;
+    @Autowired ResidentRepository residents;
     @Autowired SpaceRepository spaces;
     @Autowired SpaceReservationRepository reservations;
     @Autowired SpaceReservationService service;
@@ -173,7 +182,7 @@ class SpaceReservationConcurrencyIntegrationTest {
         var first = service.create(tenant(fixture.firstUser()), request(fixture, fixture.spaceId(), fixture.start()));
         service.cancel(tenant(fixture.firstUser()), first.getReservationId());
         var second = service.create(tenant(fixture.secondUser()), request(fixture, fixture.spaceId(), fixture.start()));
-        service.adminEnd(new AuthUser(fixture.adminUser(), "ADMIN"), second.getReservationId());
+        service.adminEnd(owner(fixture.adminUser()), second.getReservationId());
         clearInvocations(notifications, slack);
 
         var third = service.create(tenant(fixture.firstUser()), request(fixture, fixture.spaceId(), fixture.start()));
@@ -206,7 +215,7 @@ class SpaceReservationConcurrencyIntegrationTest {
                                 .isEqualTo(SpaceReservationStatus.requested);
                         loaded.countDown();
                         await(resume);
-                        return service.adminConfirm(new AuthUser(fixture.adminUser(), "ADMIN"), old.getReservationId());
+                        return service.adminConfirm(owner(fixture.adminUser()), old.getReservationId());
                     });
                     return new Outcome(result.getReservationId(), null);
                 } catch (Throwable failure) {
@@ -288,12 +297,15 @@ class SpaceReservationConcurrencyIntegrationTest {
             User user = user(prefix + i, UserRole.tenant);
             Room room = rooms.saveAndFlush(Room.builder().building(building).roomNo(i).floor(1)
                     .roomSize(new BigDecimal("20.00")).rentPrice(new BigDecimal("500000")).build());
-            contracts.saveAndFlush(Contract.builder().user(user).room(room).contractSt(ContractStatus.active)
-                    .contractStart(LocalDate.of(2100, 1, 1)).contractEnd(LocalDate.of(2100, 7, 1))
+            Contract contract = contracts.saveAndFlush(Contract.builder().user(user).room(room).contractSt(ContractStatus.active)
+                    .contractStart(LocalDate.now().minusMonths(1)).contractEnd(LocalDate.now().plusMonths(1))
                     .rentPrice(new BigDecimal("500000")).lessorNm("Test lessor").lessorTel("010-1111-1111")
                     .lessorAddr("Fixture address").lessorRrn("test-only").build());
+            residents.saveAndFlush(Resident.builder().buildingId(building.getBuildingId())
+                    .contractId(contract.getContractId()).userId(user.getUserId()).build());
         }
-        user(prefix + "admin", UserRole.admin);
+        user(prefix + "admin", UserRole.user);
+        buildingOwner(jdbc, prefix + "admin", building.getBuildingId());
         LocalDateTime start = LocalDate.now().plusDays(2).atTime(10, 0);
         return new Fixture(building.getBuildingId(), space.getSpaceId(), secondSpace.getSpaceId(), prefix + "1", prefix + "2",
                 prefix + "admin", start);
@@ -314,17 +326,29 @@ class SpaceReservationConcurrencyIntegrationTest {
                 .srStartAt(start).srEndAt(start.plusHours(2)).srNoPeople(1).build();
     }
 
-    private static AuthUser tenant(String userId) {
-        return new AuthUser(userId, "TENANT");
+    private static AuthUser tenant(String userId) { return authenticated(userId, "TENANT"); }
+
+    private static AuthUser owner(String userId) { return authenticated(userId, "OWNER"); }
+
+    private static AuthUser authenticated(String userId, String role) {
+        AuthUser principal = new AuthUser(userId, role);
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(principal, null, principal.getAuthorities()));
+        return principal;
     }
+
+    @AfterEach
+    void clearPrincipal() { SecurityContextHolder.clearContext(); }
 
     private void verifyCreationEvents(Integer reservationId) {
         String winnerUser = jdbc.queryForObject("SELECT user_id FROM space_reservations WHERE reservation_id = ?",
                 String.class, reservationId);
         verify(notifications).notifyUser(eq(winnerUser), eq("SP_REQ"), anyString(), isNull(),
                 eq(TargetType.space), eq(reservationId), eq("/space-reservations/my"));
-        verify(notifications).notifyAdmins(eq("SP_REQ"), anyString(), eq(winnerUser), eq(TargetType.space),
-                eq(reservationId), eq("/admin/space-reservations"));
+        String operator = jdbc.queryForObject("SELECT bm.user_id FROM building_memberships bm JOIN space_reservations sr "
+                + "ON sr.building_id=bm.building_id WHERE sr.reservation_id=? AND bm.state='ACTIVE'", String.class, reservationId);
+        verify(notifications).notifyUser(eq(operator), eq("SP_REQ"), anyString(), eq(winnerUser), eq(TargetType.space),
+                eq(reservationId), eq("/owner/reservations/spaces"));
         verify(slack).sendSpaceReservationAlert(eq(reservationId), eq(winnerUser), anyString(), anyString());
         verifyNoMoreInteractions(notifications, slack);
     }

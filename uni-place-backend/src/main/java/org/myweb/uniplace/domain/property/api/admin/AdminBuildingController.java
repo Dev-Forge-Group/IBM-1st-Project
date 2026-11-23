@@ -4,8 +4,12 @@ package org.myweb.uniplace.domain.property.api.admin;
 import org.myweb.uniplace.domain.property.api.dto.request.BuildingCreateRequest;
 import org.myweb.uniplace.domain.property.api.dto.request.BuildingUpdateRequest;
 import org.myweb.uniplace.domain.property.api.dto.response.BuildingDetailResponse;
+import org.myweb.uniplace.domain.property.api.dto.response.BuildingSummaryResponse;
 import org.myweb.uniplace.domain.property.application.BuildingService;
 import org.myweb.uniplace.global.response.ApiResponse;
+import org.myweb.uniplace.global.response.PageResponse;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
@@ -15,10 +19,21 @@ import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/admin/buildings")
+@RequestMapping("/owner/buildings")
 public class AdminBuildingController {
 
     private final BuildingService buildingService;
+
+    @GetMapping
+    public ApiResponse<PageResponse<BuildingSummaryResponse>> list(
+            @RequestParam(name = "page", defaultValue = "1") int page,
+            @RequestParam(name = "size", defaultValue = "10") int size,
+            @RequestParam(name = "sort", defaultValue = "buildingId") String sort,
+            @RequestParam(name = "direct", defaultValue = "DESC") String direct) {
+        Sort.Direction direction = "ASC".equalsIgnoreCase(direct) ? Sort.Direction.ASC : Sort.Direction.DESC;
+        return ApiResponse.ok(PageResponse.of(buildingService.searchOwnedPage(
+                PageRequest.of(Math.max(page, 1) - 1, Math.min(Math.max(size, 1), 100), Sort.by(direction, sort)))));
+    }
 
     @GetMapping("/{buildingId}")
     public ApiResponse<BuildingDetailResponse> detail(

@@ -11,7 +11,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface SpaceRepository extends JpaRepository<CommonSpace, Integer> {
+public interface SpaceRepository extends JpaRepository<CommonSpace, Integer>, JpaSpecificationExecutor<CommonSpace> {
 
     @Query(
         value = """

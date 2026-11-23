@@ -6,6 +6,7 @@ import org.myweb.uniplace.domain.reservation.application.TourReservationService;
 import org.myweb.uniplace.domain.reservation.domain.entity.TourReservationEntity;
 import org.myweb.uniplace.domain.reservation.domain.enums.TourStatus;
 import org.myweb.uniplace.domain.reservation.repository.TourReservationRepository;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.global.response.ApiResponse;
 import org.myweb.uniplace.global.response.PageResponse;
 
@@ -19,11 +20,12 @@ import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/admin/tour-reservations") // ✅ 사용자용과 분리
+@RequestMapping("/owner/tour-reservations")
 public class AdminTourReservationController {
 
     private final TourReservationRepository tourReservationRepository;
     private final TourReservationService tourReservationService;
+    private final OwnershipAccess ownership;
 
     @GetMapping
     public ApiResponse<PageResponse<TourReservationResponse>> list(
@@ -40,7 +42,10 @@ public class AdminTourReservationController {
 
         Pageable pageable = PageRequest.of(page - 1, size, direction, sort);
 
-        Page<TourReservationEntity> result = tourReservationRepository.findAll(pageable);
+        ownership.requireOwner();
+        var roomIds = ownership.manageableRoomIds();
+        Page<TourReservationEntity> result = roomIds.isEmpty() ? Page.empty(pageable)
+                : tourReservationRepository.findByRoom_RoomIdIn(roomIds, pageable);
         return ApiResponse.ok(PageResponse.of(result.map(TourReservationResponse::fromEntity)));
     }
 
