@@ -1,26 +1,26 @@
 package org.myweb.uniplace.domain.ai.api;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.myweb.uniplace.domain.ai.application.tool.AiToolExecutor;
 import org.myweb.uniplace.domain.ai.application.tool.AiToolRequest;
 import org.myweb.uniplace.domain.ai.application.tool.AiToolResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
 
 /**
  * AI Tool 실행 컨트롤러 — 내부 서버 간 통신 전용.
  *
  * Python tool_orchestrator → 여기서 DB 조회 → 결과 반환.
  *
- * [보안] 이 엔드포인트는 외부에 노출되면 안 됩니다.
- * SecurityConfig에서 내부 IP 또는 X-Internal-Token으로 보호하세요.
+ * The internal token authenticates the service. Personal queries additionally
+ * require an authenticated member in the executor.
  */
-@Slf4j
 @RestController
 @RequestMapping("/v1/ai/tools")
 @RequiredArgsConstructor
@@ -36,19 +36,20 @@ public class AiToolController {
         @RequestBody AiToolRequest request
     ) {
         if (!StringUtils.hasText(internalToken)) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "AI internal token is not configured");
+            return respond(HttpStatus.SERVICE_UNAVAILABLE, AiToolResponse.fail("INTERNAL_AUTH_MISCONFIGURED"));
         }
-        if (!internalToken.equals(callerToken)) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized internal caller");
+        if (callerToken == null || !MessageDigest.isEqual(
+                internalToken.getBytes(StandardCharsets.UTF_8), callerToken.getBytes(StandardCharsets.UTF_8))) {
+            return respond(HttpStatus.UNAUTHORIZED, AiToolResponse.fail("INTERNAL_AUTH_INVALID"));
         }
-
-        log.info("[AiToolController] tool={} userId={}", request.getTool(), request.getUserId());
 
         AiToolResponse response = toolExecutor.execute(request);
+        HttpStatus status = !response.isSuccess() && "AUTH_REQUIRED".equals(response.getError())
+                ? HttpStatus.UNAUTHORIZED : HttpStatus.OK;
+        return respond(status, response);
+    }
 
-        if (!response.isSuccess() && "AUTH_REQUIRED".equals(response.getError())) {
-            return ResponseEntity.status(401).body(response);
-        }
-        return ResponseEntity.ok(response);
+    private ResponseEntity<AiToolResponse> respond(HttpStatus status, AiToolResponse response) {
+        return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(response);
     }
 }

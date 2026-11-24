@@ -1,7 +1,5 @@
 package org.myweb.uniplace.domain.ai.application.gateway;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayRequest;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayResponse;
 import org.myweb.uniplace.domain.ai.domain.AiIntent;
@@ -11,6 +9,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 @Component
@@ -39,13 +38,8 @@ public class AiGatewayImpl implements AiGateway {
                 .body(request)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (req, res) -> {
-                    String body = "";
-                    try {
-                        body = new String(res.getBody().readAllBytes(), StandardCharsets.UTF_8);
-                    } catch (IOException ignored) {}
-                    throw new AiServiceException(
-                        "AI gateway call failed [status=" + res.getStatusCode().value()
-                        + ", path=" + path + ", body=" + body + "]");
+                    throw new AiServiceException("AI gateway call failed [status="
+                            + res.getStatusCode().value() + "]");
                 })
                 .body(AiGatewayResponse.class);
 
@@ -53,8 +47,10 @@ public class AiGatewayImpl implements AiGateway {
             return response;
         } catch (AiServiceException e) {
             throw e;
+        } catch (ResourceAccessException e) {
+            throw new AiServiceException("AI gateway upstream unavailable");
         } catch (Exception e) {
-            throw new AiServiceException("AI gateway call failed", e);
+            throw new AiServiceException("AI gateway call failed");
         }
     }
 

@@ -67,6 +67,8 @@ CONTRACT·BUILDING·ROOM·SPACE 파일 URL은 `/files/{id}/view|download` proxy�
 
 Spring의 `POST /api/v1/ai/tools/execute`는 설정된 `X-Internal-Token`으로 내부 호출자를 확인한다. 이 토큰은 사용자의 신원이나 OWNER·ADMIN 권한을 대신하지 않는다. 공개 도구는 공개 자산 view로 제한하며 `query_database_admin` 업무 전체 조회 도구는 거절한다.
 
+내부 토큰 누락·불일치는 `INTERNAL_AUTH_INVALID`(401), 내부 토큰 미설정은 `INTERNAL_AUTH_MISCONFIGURED`(503)로 응답한다. 내부 인증이 맞아도 개인 조회에서 사용자 확인에 실패하면 `AUTH_REQUIRED`(401)로 응답한다. 콜백 응답은 캐시하지 않으며 Spring의 AI 로그와 오류 응답에는 사용자 요청 문장, SQL, 외부 AI 오류 본문을 남기지 않는다.
+
 `query_my_data`는 현재 SecurityContext의 유효한 MEMBER를 요구한다. 본문 `userId`가 있으면 인증된 사용자와 같아야 한다. 임의 `userId`·`userSegment`·ADMIN 문자열만 전달해서 개인 데이터를 읽을 수 없다. 외부 AI의 개인 조회 callback에는 내부 토큰과 함께 검증 가능한 사용자 인증을 전달해야 한다. 현재 구현에서 가능한 경로는 유효한 사용자 `Authorization: Bearer ...`가 Spring JWT 필터를 통과하는 것이다. 별도 위임 토큰 방식은 구현된 것으로 간주하지 않는다.
 
 현재 Spring `AiGatewayImpl`은 외부 AI로 사용자 Bearer를 자동 전달하지 않고, 별도 `uniplace-ai`의 tool client도 내부 토큰만 보내는 상태다. 따라서 이 두 구간의 인증 전달을 별도로 구현·검증하기 전에는 개인 도구 callback이 `AUTH_REQUIRED`(401)로 거절된다. 공개 도구의 성공이나 SQL projection 단위 검증이 개인 AI 여정의 통과를 뜻하지 않는다. 토큰을 prompt·도구 인자·로그에 넣어 전달하는 방식은 사용하지 않는다.

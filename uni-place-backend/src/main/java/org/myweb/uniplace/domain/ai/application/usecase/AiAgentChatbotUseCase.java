@@ -1,6 +1,5 @@
 package org.myweb.uniplace.domain.ai.application.usecase;
 
-import lombok.extern.slf4j.Slf4j;
 import org.myweb.uniplace.domain.ai.application.gateway.AiGateway;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayRequest;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayResponse;
@@ -12,7 +11,6 @@ import org.springframework.stereotype.Component;
 import java.util.HashMap;
 import java.util.Map;
 
-@Slf4j
 @Component
 public class AiAgentChatbotUseCase extends AbstractForwardUseCase {
 
@@ -45,15 +43,7 @@ public class AiAgentChatbotUseCase extends AbstractForwardUseCase {
                     .prompt(request.getPrompt())
                     .slots(slots)
                     .build();
-
-            log.info("[AiAgentChatbotUseCase] userId injected from SecurityContext: {}", serverUserId);
         }
-
-        log.info("[AiAgentChatbotUseCase] forwarding to tool_orchestrator, prompt={} userId={}",
-            finalRequest.getPrompt() != null
-                ? finalRequest.getPrompt().substring(0, Math.min(80, finalRequest.getPrompt().length()))
-                : "",
-            finalRequest.getUserId());
 
         return super.execute(finalRequest);
     }

@@ -39,6 +39,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -52,6 +53,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.myweb.uniplace.domain.ai.application.AiIntentRouter;
 import org.myweb.uniplace.domain.ai.application.gateway.AiGateway;
@@ -419,6 +421,70 @@ class ContractFileAccessIntegrationTest {
     }
 
     @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "synthetic-invalid-ai-internal-token")
+    void personalAiCallbackRequiresInternalAuthenticationEvenForAnActiveMember(String internalToken) throws Exception {
+        Reply result = aiTool("query_my_data", "SELECT user_id FROM users", fixture.ownerId(), token("owner"),
+                internalToken);
+        assertAiToolAuthenticationError(result, "INTERNAL_AUTH_INVALID");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"anonymous", "guest"})
+    void personalAiCallbackRequiresAMemberBearerWithTheInternalToken(String actor) throws Exception {
+        Reply result = aiTool("query_my_data", "SELECT user_id FROM users", fixture.ownerId(), token(actor),
+                AI_INTERNAL_TOKEN);
+        assertAiToolAuthenticationError(result, "AUTH_REQUIRED");
+    }
+
+    @Test
+    void personalAiCallbackRejectsAnIdThatDiffersFromTheMemberBearer() throws Exception {
+        Reply result = aiTool("query_my_data", "SELECT user_id FROM users", fixture.otherId(), token("owner"),
+                AI_INTERNAL_TOKEN);
+        assertAiToolAuthenticationError(result, "AUTH_REQUIRED");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void personalAiCallbackSelectsOnlyTheAuthenticatedMemberRow(boolean includeMatchingClaim) throws Exception {
+        String caller = fixture.ownerId();
+        Reply result = aiTool("query_my_data", "SELECT user_id FROM users", includeMatchingClaim ? caller : null,
+                token("owner"), AI_INTERNAL_TOKEN);
+        assertAiToolMemberRow(result, caller);
+    }
+
+    @Test
+    void staffCannotUsePersonalAiCallbackEvenWithTheInternalToken() throws Exception {
+        Reply result = aiTool("query_my_data", "SELECT user_id FROM users", fixture.adminId(), token("admin"),
+                AI_INTERNAL_TOKEN);
+        assertError(result, ErrorCode.FORBIDDEN);
+        assertThat(json.readTree(result.body()).hasNonNull("data")).isFalse();
+    }
+
+    @Test
+    void personalAiCallbackRejectsAnExistingBearerAfterMemberIsDeactivated() throws Exception {
+        String caller = fixture.ownerId();
+        String bearer = token("owner");
+        assertAiToolMemberRow(aiTool("query_my_data", "SELECT user_id FROM users", caller, bearer,
+                AI_INTERNAL_TOKEN), caller);
+        assertThat(jdbc.update("UPDATE users SET user_st='inactive' WHERE user_id=?", caller)).isEqualTo(1);
+
+        Reply denied = aiTool("query_my_data", "SELECT user_id FROM users", caller, bearer, AI_INTERNAL_TOKEN);
+        assertError(denied, ErrorCode.UNAUTHORIZED);
+        assertThat(json.readTree(denied.body()).hasNonNull("data")).isFalse();
+    }
+
+    @Test
+    void publicAiCallbackWithInternalTokenStillReadsPublicRoomsWithoutAMemberBearer() throws Exception {
+        Reply result = aiTool("query_database", "SELECT room_id FROM rooms WHERE room_id = " + fixture.roomId(),
+                null, null, AI_INTERNAL_TOKEN);
+        JsonNode rows = data(result);
+        assertNoStore(result);
+        assertThat(rows.size()).isEqualTo(1);
+        assertThat(rows.get(0).path("room_id").asInt()).isEqualTo(fixture.roomId());
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"anonymous", "guest", "other", "owner", "operator", "admin"})
     void internalBulkMetadataHonorsEveryContractInTheRequestedMap(String actor) {
         withActor(actor, () -> {
@@ -693,6 +759,32 @@ class ContractFileAccessIntegrationTest {
         request.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
         HttpResponse<byte[]> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
         return new Reply(response.statusCode(), response.body(), response.headers().map());
+    }
+
+    private Reply aiTool(String tool, String sql, String claimedUserId, String bearer, String internalToken)
+            throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("tool", tool);
+        payload.put("args", Map.of("sql", sql));
+        if (claimedUserId != null) payload.put("userId", claimedUserId);
+        Map<String, String> headers = internalToken == null ? Map.of() : Map.of("X-Internal-Token", internalToken);
+        return request("POST", "/v1/ai/tools/execute", bearer, json.writeValueAsBytes(payload), "application/json", headers);
+    }
+
+    private void assertAiToolAuthenticationError(Reply response, String error) throws Exception {
+        assertThat(response.status()).isEqualTo(401);
+        assertNoStore(response);
+        JsonNode body = json.readTree(response.body());
+        assertThat(body.path("success").asBoolean(true)).isFalse();
+        assertThat(body.path("error").asText()).isEqualTo(error);
+        assertThat(body.has("data")).isFalse();
+    }
+
+    private void assertAiToolMemberRow(Reply response, String caller) throws Exception {
+        JsonNode rows = data(response);
+        assertNoStore(response);
+        assertThat(rows.size()).isEqualTo(1);
+        assertThat(rows.get(0).path("user_id").asText()).isEqualTo(caller);
     }
 
     private JsonNode data(Reply response) throws Exception {

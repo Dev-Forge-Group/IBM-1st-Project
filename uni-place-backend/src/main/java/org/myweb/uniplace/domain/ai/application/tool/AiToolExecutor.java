@@ -46,8 +46,6 @@ public class AiToolExecutor {
         Map<String, Object> args = req.getArgs() != null ? req.getArgs() : Map.of();
         String userId = req.getUserId();
 
-        log.info("[AiToolExecutor] tool={} userId={}", tool, userId);
-
         try {
             return switch (tool) {
                 case "query_database"              -> executePublicSql(args);
@@ -60,17 +58,14 @@ public class AiToolExecutor {
                                                         intOr(args, "days", 7), intOr(args, "limit", 3)));
                 case "list_rooms_for_embedding"    -> rows(publicReads.roomsForEmbedding());
                 case "classify_complain_priority"  -> AiToolResponse.fail("관리자 API를 통해 처리됩니다.");
-                default -> {
-                    log.warn("[AiToolExecutor] 알 수 없는 tool: {}", tool);
-                    yield AiToolResponse.fail("지원하지 않는 도구: " + tool);
-                }
+                default -> AiToolResponse.fail("지원하지 않는 도구입니다.");
             };
         } catch (IllegalArgumentException e) {
             // SQL 검증 실패
-            log.warn("[AiToolExecutor] SQL 검증 실패: {}", e.getMessage());
-            return AiToolResponse.fail("허용되지 않는 쿼리입니다: " + e.getMessage());
+            log.warn("[AiToolExecutor] SQL 검증 실패");
+            return AiToolResponse.fail("허용되지 않는 쿼리입니다.");
         } catch (Exception e) {
-            log.error("[AiToolExecutor] 실행 오류 tool={}: {}", tool, e.getMessage(), e);
+            log.error("[AiToolExecutor] 실행 오류 type={}", e.getClass().getSimpleName());
             return AiToolResponse.fail("도구 실행 중 오류가 발생했습니다.");
         }
     }
@@ -94,7 +89,6 @@ public class AiToolExecutor {
             return AiToolResponse.authRequired();
         }
 
-        log.info("[AiToolExecutor] SQL실행(공개): {}", sql.substring(0, Math.min(150, sql.length())));
         List<Map<String, Object>> rows = runNativeQuery(contracted);
 
         Map<String, Object> meta = new LinkedHashMap<>();
@@ -134,8 +128,6 @@ public class AiToolExecutor {
         //         SQL의 조건(OR 1=1, user_id 누락, 조건 없는 JOIN 등)과 상관없이 타인 행에 닿지 않는다.
         String contracted = AiSqlRewriter.rewrite(sql, AiDataContract.Audience.USER, userId);
 
-        log.info("[AiToolExecutor] SQL실행(개인 userId={}): {}",
-                userId, sql.substring(0, Math.min(150, sql.length())));
         List<Map<String, Object>> rows = runNativeQuery(contracted);
 
         Map<String, Object> meta = new LinkedHashMap<>();
@@ -187,15 +179,7 @@ public class AiToolExecutor {
      */
     private List<Map<String, Object>> runNativeQuery(String sql) {
         String finalSql = appendLimit(sql, 50);
-        List<Map<String, Object>> rawRows;
-        try {
-            rawRows = jdbcTemplate.queryForList(finalSql);
-        } catch (Exception e) {
-            log.warn("[AiToolExecutor] 쿼리 실행 실패: {}", e.getMessage());
-            throw e;
-        }
-
-        return convertRows(rawRows);
+        return convertRows(jdbcTemplate.queryForList(finalSql));
     }
 
     private AiToolResponse rows(List<Map<String, Object>> rawRows) {
