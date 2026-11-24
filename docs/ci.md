@@ -2,7 +2,7 @@
 
 `.github/workflows/ci.yml`은 모든 pull request, `main`·`dev`·`release-validation/**` push, 수동 실행에서 아래 두 검사를 실행한다. 경로 필터로 검사가 빠지지 않으며, 같은 PR/브랜치의 오래된 실행은 취소한다.
 
-`release-validation/**`는 배포 브랜치를 바꾸지 않고 릴리스 후보를 검사하는 경로다. 이 CI는 읽기 전용 권한으로 실행하며 ECR·S3·CloudFront 배포와 연결하지 않는다. 검사 결과와 실제 ruleset·배포 대기 상태는 각각 확인해야 한다.
+`release-validation/**`는 배포 브랜치를 바꾸지 않고 릴리스 후보를 검사하는 경로다. CI는 읽기 전용 권한으로 실행한다. 릴리스 워크플로에서도 같은 검사를 호출하며, 검사 결과와 실제 ruleset·배포 대기 상태는 각각 확인한다.
 
 | 검사 이름 | 도구 | 실행 내용 |
 | --- | --- | --- |
@@ -59,4 +59,10 @@ python3 -B -m unittest discover -s scripts/ci -p 'test_*.py' -v
 
 workflow를 원격에 반영하면 PR에 검사가 생성된다. 병합 필수 검사로 강제하려면 저장소 ruleset/branch protection에서 `Frontend checks`, `Backend checks`를 required status check로 지정해야 한다. 이 파일은 그 설정을 변경하지 않는다.
 
-기존 배포 workflow는 독립적으로 실행된다. 이 검사를 추가한 것만으로 배포 workflow가 결과를 기다리지는 않는다. 배포 연계는 별도로 검토한다.
+## 웹 릴리스가 기다리는 검사
+
+백엔드 이미지, 프런트 정적 배포, 수동 프런트 이미지 워크플로의 `Verify release commit` 작업이 `ci.yml`을 재사용한다. 이 작업에는 저장소 읽기 권한만 부여한다. 프런트와 백엔드 검사 및 필수 JUnit 확인이 모두 끝나야 태그·릴리스 생성, ECR 업로드, S3 업로드·CloudFront 무효화 작업으로 넘어간다.
+
+검사, 태그 생성, 이미지 빌드, 정적 배포는 각각 실행의 `github.sha`를 체크아웃한다. 릴리스 호출은 `refs/heads/dev`에서만 실행된다. 수동 실행도 같은 조건을 적용하며 검사 실패·취소·건너뜀 시 배포 작업은 실행되지 않는다. 기존 PR과 검증 브랜치 CI는 계속 독립적으로 실행된다. AI 이미지 승격은 별도 워크플로의 경계를 따른다.
+
+운영에서 이 조건의 동작을 확인할 때는 대상 커밋과 일치하는 GitHub Actions 결과에서 검사 실패 뒤 쓰기 작업이 건너뛰어졌는지 확인한다. 브랜치 보호, AWS 역할의 브랜치 제한, 검증한 이미지 다이제스트와 실제 실행 이미지 사이의 일치는 별도로 확인한다.

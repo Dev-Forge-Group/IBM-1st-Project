@@ -14,14 +14,24 @@ on:
   workflow_dispatch:
 
 jobs:
+  verify:
+    name: Verify release commit
+    if: github.ref == 'refs/heads/dev'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   makeTagAndRelease:
     runs-on: ubuntu-latest
+    needs: verify
     permissions:
       contents: write
     outputs:
       tag_name: ${{ steps.create_tag.outputs.new_tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Create Tag
         id: create_tag
@@ -50,6 +60,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3

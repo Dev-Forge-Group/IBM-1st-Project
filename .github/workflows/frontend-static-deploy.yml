@@ -14,8 +14,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify:
+    name: Verify release commit
+    if: github.ref == 'refs/heads/dev'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   deploy:
     name: Build and Deploy Frontend To S3
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -30,6 +38,8 @@ jobs:
       APP_CONFIG_GEMINI_API_KEY: ${{ secrets.FRONTEND_GEMINI_API_KEY || secrets.REACT_APP_GEMINI_API_KEY || vars.FRONTEND_GEMINI_API_KEY || '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
