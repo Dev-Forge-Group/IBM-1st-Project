@@ -63,6 +63,8 @@ CONTRACT·BUILDING·ROOM·SPACE 파일 URL은 `/files/{id}/view|download` proxy�
 
 이 문서는 구현 계약이다. 운영 DB에 V17을 적용했거나 운영 소유권 전환을 완료했다는 의미가 아니다. 운영 적용에는 대상 DB·백업/복구·배포 순서·기존 데이터 검토를 확정한 별도 실행이 필요하다. 테스트 fixture의 직접 SQL grant는 합성 검증 전용이며 운영 전환 절차가 아니다.
 
+시범 자산 선정과 V16 복원 연습, 운영 진행·중단 기준은 [소유권 전환 준비](ownership-rollout.md)에 정리한다.
+
 ## 외부 AI 인증 전달 경계
 
 Spring의 `POST /api/v1/ai/tools/execute`는 설정된 `X-Internal-Token`으로 내부 호출자를 확인한다. 이 토큰은 사용자의 신원이나 OWNER·ADMIN 권한을 대신하지 않는다. 공개 도구는 공개 자산 view로 제한하며 `query_database_admin` 업무 전체 조회 도구는 거절한다.

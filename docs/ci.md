@@ -24,6 +24,7 @@ python3 ../scripts/ci/verify_junit.py build/test-results/test
 검사기는 XML에 기록된 개수와 실제 `testcase` 항목이 일치하는지, 실패·오류·0개 실행이 없는지 확인한다. 아래 통합 suite가 누락되거나 비어 있거나 일부라도 skip이면 실패한다. 테스트 개수를 고정하지 않아 새 회귀를 추가할 수 있다.
 
 - `OwnerAccountPropertyIntegrationTest`: 실제 JWT·HTTP·MySQL·Flyway에서 MEMBER/STAFF 분리, OWNER 신청·심사와 같은 토큰의 권한 반영, 자산 증빙·승인과 draft 공개 범위, 건물/개별 방 소유권, 소유주 간 CRUD·페이지/count·파일 격리, 계약 당사자 snapshot과 날짜·입주자 관계 기반 TENANT를 검사한다. 합성 Storage·문서·알림만 사용한다.
+- `V17OwnershipUpgradeIntegrationTest`: 데이터가 있는 MySQL V16을 V17로 올려 기존 계정·자산·계약·입주자 이력과 소유권 부여 범위를 확인한다. V16의 합성 논리 백업을 별도 DB에 복원한 뒤 다시 V17을 적용해 같은 결과를 확인한다. [전환 준비](ownership-rollout.md).
 - `CommunityPrivacyIntegrationTest`: 실제 MySQL·Flyway·JWT·HTTP에서 익명 게시글·댓글과 본인 여부를 확인하고 STAFF도 익명 작성자 신원을 받지 못하는 개인정보 계약.
 - `AiDataContractMySqlTest`: 실제 MySQL에 대한 AI 데이터 조회 계약. 원래 Docker가 없으면 skip할 수 있어 별도로 실행 여부를 확인한다.
 - `CommonCodeLookupIntegrationTest`: 비활성 코드·그룹까지 포함한 공통코드 존재 조회 계약.
