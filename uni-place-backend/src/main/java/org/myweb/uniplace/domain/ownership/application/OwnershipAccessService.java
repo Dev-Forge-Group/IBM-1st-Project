@@ -31,6 +31,52 @@ public class OwnershipAccessService implements OwnershipAccess {
             """;
     private static final String LIVE_BUILDING = "UPPER(COALESCE(b.delete_yn,'N'))<>'Y'";
     private static final String LIVE_ROOM = "UPPER(COALESCE(r.delete_yn,'N'))<>'Y'";
+    private static final String MANAGED_BUILDINGS = """
+            SELECT b.building_id
+            FROM building_memberships membership
+            JOIN building b ON b.building_id=membership.building_id
+            WHERE membership.user_id=? AND %s
+              AND (
+                membership.state='ACTIVE'
+                OR (
+                  membership.state='PENDING' AND membership.origin='CREATED'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM building_memberships active_link
+                    WHERE active_link.building_id=b.building_id AND active_link.state='ACTIVE'
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM ownership_review_events reviewed
+                    WHERE reviewed.review_type='BUILDING' AND reviewed.resource_id=b.building_id
+                      AND reviewed.target_user_id=membership.user_id
+                  )
+                )
+              )
+            """.formatted(LIVE_BUILDING);
+
+    // A room with any active unit link no longer inherits management from its building.
+    private static final String MANAGED_ROOMS = """
+            SELECT r.room_id
+            FROM room_memberships unit
+            JOIN rooms r ON r.room_id=unit.room_id
+            JOIN building b ON b.building_id=r.building_id
+            WHERE unit.user_id=? AND unit.state='ACTIVE' AND %s AND %s
+            UNION ALL
+            SELECT r.room_id
+            FROM (%s) managed_building
+            JOIN rooms r ON r.building_id=managed_building.building_id
+            WHERE %s AND NOT EXISTS (
+              SELECT 1 FROM room_memberships active_unit
+              WHERE active_unit.room_id=r.room_id AND active_unit.state='ACTIVE'
+            )
+            """.formatted(LIVE_ROOM, LIVE_BUILDING, MANAGED_BUILDINGS, LIVE_ROOM);
+
+    private static final String MANAGED_CONTRACTS = """
+            SELECT c.contract_id
+            FROM contract_owner_parties party
+            JOIN contract c ON c.contract_id=party.contract_id
+            JOIN (%s) managed_room ON managed_room.room_id=c.room_id
+            WHERE party.user_id=? AND c.user_id<>party.user_id
+            """.formatted(MANAGED_ROOMS);
 
     private final JdbcTemplate jdbc;
 
@@ -106,26 +152,16 @@ public class OwnershipAccessService implements OwnershipAccess {
 
     @Override
     public boolean canManageBuilding(String userId, Integer buildingId) {
-        if (buildingId == null || !hasActiveOwner(userId)) return false;
-        return exists("SELECT COUNT(*) FROM building b WHERE b.building_id=? AND " + LIVE_BUILDING + " AND ("
-                + "EXISTS (SELECT 1 FROM building_memberships bm WHERE bm.building_id=b.building_id AND bm.user_id=? AND bm.state='ACTIVE')"
-                + " OR (NOT EXISTS (SELECT 1 FROM building_memberships active_link WHERE active_link.building_id=b.building_id AND active_link.state='ACTIVE')"
-                + " AND EXISTS (SELECT 1 FROM building_memberships draft WHERE draft.building_id=b.building_id AND draft.user_id=?"
-                + " AND draft.state='PENDING' AND draft.origin='CREATED'"
-                + " AND NOT EXISTS (SELECT 1 FROM ownership_review_events reviewed WHERE reviewed.review_type='BUILDING'"
-                + " AND reviewed.resource_id=b.building_id AND reviewed.target_user_id=draft.user_id))))", buildingId, userId, userId);
+        return buildingId != null && hasActiveOwner(userId)
+                && exists("SELECT COUNT(*) FROM (" + MANAGED_BUILDINGS + ") managed WHERE building_id=?",
+                        userId, buildingId);
     }
 
     @Override
     public boolean canManageRoom(String userId, Integer roomId) {
-        if (roomId == null || !hasActiveOwner(userId)) return false;
-        List<Integer> parents = jdbc.queryForList("SELECT r.building_id FROM rooms r JOIN building b ON b.building_id=r.building_id"
-                + " WHERE r.room_id=? AND " + LIVE_ROOM + " AND " + LIVE_BUILDING, Integer.class, roomId);
-        if (parents.isEmpty()) return false;
-        if (exists("SELECT COUNT(*) FROM room_memberships WHERE room_id=? AND state='ACTIVE'", roomId)) {
-            return exists("SELECT COUNT(*) FROM room_memberships WHERE room_id=? AND user_id=? AND state='ACTIVE'", roomId, userId);
-        }
-        return canManageBuilding(userId, parents.get(0));
+        return roomId != null && hasActiveOwner(userId)
+                && exists("SELECT COUNT(*) FROM (" + MANAGED_ROOMS + ") managed WHERE room_id=?",
+                        userId, userId, roomId);
     }
 
     @Override
@@ -140,37 +176,27 @@ public class OwnershipAccessService implements OwnershipAccess {
 
     @Override
     public boolean canManageContract(String userId, Integer contractId) {
-        if (contractId == null || !hasActiveOwner(userId)
-                || !exists("SELECT COUNT(*) FROM contract_owner_parties WHERE contract_id=? AND user_id=?", contractId, userId)) return false;
-        List<Integer> rooms = jdbc.queryForList("SELECT room_id FROM contract WHERE contract_id=? AND user_id<>?",
-                Integer.class, contractId, userId);
-        return !rooms.isEmpty() && canManageRoom(userId, rooms.get(0));
+        return contractId != null && hasActiveOwner(userId)
+                && exists("SELECT COUNT(*) FROM (" + MANAGED_CONTRACTS + ") managed WHERE contract_id=?",
+                        userId, userId, userId, contractId);
     }
 
     @Override
     public Set<Integer> manageableBuildingIds() {
         String userId = requireOwner();
-        LinkedHashSet<Integer> result = new LinkedHashSet<>();
-        for (Integer id : ids("SELECT building_id FROM building")) if (canManageBuilding(userId, id)) result.add(id);
-        return Set.copyOf(result);
+        return Set.copyOf(ids(MANAGED_BUILDINGS, userId));
     }
 
     @Override
     public Set<Integer> manageableRoomIds() {
         String userId = requireOwner();
-        LinkedHashSet<Integer> result = new LinkedHashSet<>();
-        for (Integer id : ids("SELECT room_id FROM rooms")) if (canManageRoom(userId, id)) result.add(id);
-        return Set.copyOf(result);
+        return Set.copyOf(ids(MANAGED_ROOMS, userId, userId));
     }
 
     @Override
     public Set<Integer> manageableContractIds() {
         String userId = requireOwner();
-        LinkedHashSet<Integer> result = new LinkedHashSet<>();
-        for (Integer id : ids("SELECT contract_id FROM contract_owner_parties WHERE user_id=?", userId)) {
-            if (canManageContract(userId, id)) result.add(id);
-        }
-        return Set.copyOf(result);
+        return Set.copyOf(ids(MANAGED_CONTRACTS, userId, userId, userId));
     }
 
     @Override

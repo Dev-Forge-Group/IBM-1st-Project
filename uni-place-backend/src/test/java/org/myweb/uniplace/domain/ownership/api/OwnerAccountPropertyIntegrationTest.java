@@ -35,6 +35,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterAll;
@@ -51,6 +52,7 @@ import org.myweb.uniplace.domain.contract.repository.ResidentRepository;
 import org.myweb.uniplace.domain.file.domain.entity.UploadFile;
 import org.myweb.uniplace.domain.file.repository.UploadFileRepository;
 import org.myweb.uniplace.domain.notification.application.NotificationService;
+import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.property.domain.entity.Building;
 import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.domain.property.domain.enums.RoomStatus;
@@ -60,6 +62,7 @@ import org.myweb.uniplace.domain.user.domain.entity.User;
 import org.myweb.uniplace.domain.user.domain.enums.AccountKind;
 import org.myweb.uniplace.domain.user.domain.enums.UserRole;
 import org.myweb.uniplace.domain.user.repository.UserRepository;
+import org.myweb.uniplace.global.security.AuthUser;
 import org.myweb.uniplace.global.security.JwtProvider;
 import org.myweb.uniplace.global.slack.SlackNotificationService;
 import org.myweb.uniplace.global.storage.StorageService;
@@ -68,6 +71,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -124,6 +130,7 @@ class OwnerAccountPropertyIntegrationTest {
     @Autowired ContractRepository contracts;
     @Autowired ResidentRepository residents;
     @Autowired UploadFileRepository files;
+    @Autowired OwnershipAccess ownership;
     @Autowired PlatformTransactionManager transactions;
     @MockitoBean StorageService storage;
     @MockitoBean ContractImageService images;
@@ -731,6 +738,50 @@ class OwnerAccountPropertyIntegrationTest {
     }
 
     @Test
+    void manageableScopeSelectCountDoesNotGrowWithUnrelatedInventory() {
+        AuthUser principal = new AuthUser(f.owner(), "user", "MEMBER", Set.of("CUSTOMER", "USER", "OWNER"), "APPROVED");
+        SecurityContext previousContext = SecurityContextHolder.getContext();
+        SecurityContext ownerContext = SecurityContextHolder.createEmptyContext();
+        ownerContext.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+                principal, null, principal.getAuthorities()));
+        SecurityContextHolder.setContext(ownerContext);
+        try {
+            new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                status.setRollbackOnly();
+                User customer = users.findById(f.customer()).orElseThrow();
+                Room ownedRoom = rooms.findById(f.room()).orElseThrow();
+                int ownedContractId = contract(customer, ownedRoom, ContractStatus.requested).getContractId();
+                TestOwnershipFixtures.contractParty(jdbc, f.owner(), ownedContractId);
+                ManageableScope expected = new ManageableScope(Set.of(f.building()), Set.of(f.room()), Set.of(ownedContractId));
+
+                long beforeBaseline = sessionSelects();
+                ManageableScope baseline = manageableScope();
+                long baselineSelects = sessionSelects() - beforeBaseline;
+                assertThat(baseline).isEqualTo(expected);
+                assertThat(baselineSelects).isPositive();
+
+                List<Integer> readableContractIds = new ArrayList<>(List.of(ownedContractId));
+                for (int i = 0; i < 16; i++) {
+                    Building foreignBuilding = building(buildings, "Unassigned inventory");
+                    Room foreignRoom = room(rooms, foreignBuilding, 901);
+                    int historicalContractId = contract(customer, foreignRoom, ContractStatus.ended).getContractId();
+                    TestOwnershipFixtures.contractParty(jdbc, f.owner(), historicalContractId);
+                    readableContractIds.add(historicalContractId);
+                }
+
+                long beforeExpandedScope = sessionSelects();
+                ManageableScope expandedScope = manageableScope();
+                long expandedSelects = sessionSelects() - beforeExpandedScope;
+                assertThat(expandedScope).isEqualTo(expected);
+                assertThat(ownership.readableContractIds()).containsExactlyInAnyOrderElementsOf(readableContractIds);
+                assertThat(expandedSelects).as("SELECTs for all three manageable scopes").isEqualTo(baselineSelects);
+            });
+        } finally {
+            SecurityContextHolder.setContext(previousContext);
+        }
+    }
+
+    @Test
     void currentPropertyOwnershipDoesNotAutomaticallyGrantLegacyContractHistory() throws Exception {
         int[] ids = new TransactionTemplate(transactions).execute(status -> {
             Contract old = contract(users.findById(f.customer()).orElseThrow(), rooms.findById(f.room()).orElseThrow(),
@@ -926,6 +977,15 @@ class OwnerAccountPropertyIntegrationTest {
                 "lessorTel", "010-0000-0000", "lessorAddr", "Synthetic applicant address", "lessorRrn", "000000-0000000");
     }
 
+    private long sessionSelects() {
+        return jdbc.queryForObject("SHOW SESSION STATUS LIKE 'Com_select'", (rs, row) -> rs.getLong(2));
+    }
+
+    private ManageableScope manageableScope() {
+        return new ManageableScope(ownership.manageableBuildingIds(), ownership.manageableRoomIds(),
+                ownership.manageableContractIds());
+    }
+
     private Contract contract(User consumer, Room room, ContractStatus status) {
         LocalDate today = LocalDate.now(KST);
         LocalDate start = status == ContractStatus.ended ? today.minusMonths(2)
@@ -1024,6 +1084,7 @@ class OwnerAccountPropertyIntegrationTest {
 
     private record Fixture(String owner, String otherOwner, String customer, String applicant, String staff,
             int building, int otherBuilding, int room, int otherRoom, String buildingName, String otherBuildingName) {}
+    private record ManageableScope(Set<Integer> buildings, Set<Integer> rooms, Set<Integer> contracts) {}
     private record State(long buildings, long rooms, long files, long contracts, long residents,
             long ownerProfiles, long roleGrants, long buildingMemberships, long roomMemberships,
             long contractParties, long reviewEvents) {}
