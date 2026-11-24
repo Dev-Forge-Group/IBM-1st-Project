@@ -60,7 +60,9 @@ public class SecurityConfig {
                 .accessDeniedHandler(restAccessDeniedHandler)
             )
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers(new RegexRequestMatcher("(?i)^/static-files/(?:contract|room|building|space)(?:[/?].*)?$", null)).denyAll()
+                .requestMatchers(new RegexRequestMatcher(
+                        "(?i)^/static-files/(?:contract|room|building|space|ai_document|order_forms|ai/order_forms)(?:[/?].*)?$",
+                        null)).denyAll()
                 .requestMatchers("/files/admin", "/files/admin/**").denyAll()
                 .requestMatchers("/admin/users", "/admin/users/**",
                         "/admin/owner-applications", "/admin/owner-applications/**",
@@ -80,6 +82,7 @@ public class SecurityConfig {
                 .requestMatchers("/auth/oauth2/google/complete").permitAll()
                 // Global business analytics are not account-administration capabilities.
                 .requestMatchers("/ai/chat/admin-chatbot").denyAll()
+                .requestMatchers("/ai/payment/order-form", "/ai/payment/order-form/**").denyAll()
                 .requestMatchers("/ai/**").hasAnyRole("USER", "TENANT", "OWNER")
                 .requestMatchers("/error").permitAll()
                 .requestMatchers("/member/login").permitAll()
@@ -153,7 +156,7 @@ public class SecurityConfig {
                 .requestMatchers("/auth/face/count").hasAnyRole("ADMIN", "USER", "TENANT", "OWNER")
                 .requestMatchers("/auth/face").hasAnyRole("ADMIN", "USER", "TENANT", "OWNER")
                 .requestMatchers("/v1/ai/tools/execute").access(consumerOrAnonymous)
-                .requestMatchers(HttpMethod.POST, "/v1/ai/files/upload").hasAnyRole("USER", "TENANT", "OWNER")
+                .requestMatchers("/v1/ai/files/upload").denyAll()
                 .requestMatchers("/auth/email/send-code").permitAll()
                 .requestMatchers("/auth/email/verify-code").permitAll()
                 .requestMatchers(HttpMethod.DELETE, "/files").hasAnyRole("USER", "TENANT", "OWNER")

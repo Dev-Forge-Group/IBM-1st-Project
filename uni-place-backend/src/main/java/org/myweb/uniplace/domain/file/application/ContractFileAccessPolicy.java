@@ -28,6 +28,7 @@ public class ContractFileAccessPolicy {
 
     public void requireRead(String parentType, Integer parentId) {
         switch (type(parentType)) {
+            case "AI_DOCUMENT" -> forbidden();
             case "CONTRACT" -> {
                 AuthUser user = member();
                 if (parentId == null || !ownership.canReadContract(user.getUserId(), parentId)) forbidden();
@@ -50,6 +51,7 @@ public class ContractFileAccessPolicy {
 
     public void requireWrite(String parentType, Integer parentId) {
         switch (type(parentType)) {
+            case "AI_DOCUMENT" -> forbidden();
             case "CONTRACT" -> {
                 AuthUser user = member();
                 // A consumer uploads the signature of their own newly saved contract in the same transaction.

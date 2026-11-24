@@ -50,8 +50,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.myweb.uniplace.domain.ai.application.AiIntentRouter;
+import org.myweb.uniplace.domain.ai.application.gateway.AiGateway;
+import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayRequest;
+import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayResponse;
+import org.myweb.uniplace.domain.ai.domain.AiIntent;
 import org.myweb.uniplace.domain.contract.api.dto.response.AdminContractSummaryResponse;
 import org.myweb.uniplace.domain.contract.api.dto.response.ContractResponse;
 import org.myweb.uniplace.domain.contract.domain.entity.Contract;
@@ -101,11 +107,16 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "spring.mail.username=local", "spring.mail.password=local",
         "spring.jpa.hibernate.ddl-auto=validate", "spring.jpa.show-sql=false",
         "logging.level.org.hibernate.SQL=WARN", "payment.reconcile.enabled=false",
-        "ai.fastapi.base-url=http://127.0.0.1:9", "slack.webhook-url=",
+        "ai.fastapi.base-url=http://127.0.0.1:9",
+        "ai.internal.token=" + ContractFileAccessIntegrationTest.AI_INTERNAL_TOKEN, "slack.webhook-url=",
         "contract.status-transition-cron=-", "storage.type=local"
 })
 @Testcontainers
 class ContractFileAccessIntegrationTest {
+    static final String AI_INTERNAL_TOKEN = "synthetic-ai-file-test-token";
+    private static final String AI_DOCUMENT_NAME = "synthetic-purchase-order.xlsx";
+    private static final String XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    private static final byte[] AI_DOCUMENT_BYTES = "Synthetic AI document content".getBytes(StandardCharsets.UTF_8);
     private static final String BROWSER_PASSWORD = "Synthetic-contract-browser-only-123!";
     private static final String PASSWORD_HASH = new BCryptPasswordEncoder().encode(BROWSER_PASSWORD);
     private static final byte[] PRIVATE_PNG = png("PRIVATE SYNTHETIC CONTRACT", new Color(250, 238, 221));
@@ -139,7 +150,9 @@ class ContractFileAccessIntegrationTest {
     @Autowired BuildingRepository buildings;
     @Autowired RoomRepository rooms;
     @Autowired PlatformTransactionManager transactions;
+    @Autowired AiIntentRouter aiIntents;
     @MockitoBean StorageService storage;
+    @MockitoBean AiGateway aiGateway;
 
     private Fixture fixture;
 
@@ -288,6 +301,120 @@ class ContractFileAccessIntegrationTest {
                 assertNoPrivateStaticContent(reply);
             }
         }
+        verifyNoInteractions(storage);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "operator", "admin"})
+    void retainedAiDocumentsNeverExposeMetadataListsOrBytes(String actor) throws Exception {
+        int id = seedAiDocument().getFileId();
+        for (String path : List.of(
+                "/files?fileParentType=%20ai_document%20&fileParentId=" + fixture.roomId(),
+                "/files/" + id, "/files/" + id + "/view", "/files/" + id + "/download")) {
+            Reply reply = request("GET", path, token(actor), null, null);
+            assertError(reply, ErrorCode.FORBIDDEN);
+            assertNoAiDocumentContent(reply);
+        }
+        verifyNoInteractions(storage);
+    }
+
+    @Test
+    void legacyAiDocumentTypeCaseAndWhitespaceStillFailClosed() throws Exception {
+        int id = seedAiDocument().getFileId();
+        jdbc.update("UPDATE files SET file_parent_type=' aI_DoCuMeNt ' WHERE file_id=?", id);
+        Reply reply = request("GET", "/files/" + id + "/download", token("operator"), null, null);
+        assertError(reply, ErrorCode.FORBIDDEN);
+        assertNoAiDocumentContent(reply);
+        verifyNoInteractions(storage);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "operator", "admin"})
+    void genericAiDocumentUploadAndDeletionAreRejectedWithoutSideEffects(String actor) throws Exception {
+        int id = seedAiDocument().getFileId();
+        long before = aiDocumentCount();
+        Multipart upload = uploadBody("ai_document", fixture.roomId(), AI_DOCUMENT_NAME,
+                XLSX_MEDIA_TYPE, AI_DOCUMENT_BYTES);
+        assertDenied(request("POST", "/files", token(actor), upload.body(), upload.contentType()), actor);
+        assertDenied(request("DELETE", "/files?fileParentType=ai_document&fileParentId=" + fixture.roomId(),
+                token(actor), json.writeValueAsBytes(List.of(id)), "application/json"), actor);
+        assertThat(aiDocumentCount()).isEqualTo(before);
+        assertThat(deleted(id)).isEqualTo("N");
+        verifyNoInteractions(storage);
+    }
+
+    @Test
+    void mixedAiDocumentDeletionCannotChangeTheAuthorizedFileOrTheAiDocument() throws Exception {
+        int id = seedAiDocument().getFileId();
+        List<Integer> targets = List.of(fixture.signatureId(), id);
+        byte[] body = json.writeValueAsBytes(targets);
+        assertError(request("DELETE", "/files?fileParentType=CONTRACT&fileParentId=" + fixture.contractId(),
+                token("owner"), body, "application/json"), ErrorCode.FORBIDDEN);
+        assertError(request("DELETE", "/owner/files", token("operator"), body, "application/json"), ErrorCode.FORBIDDEN);
+        withActor("owner", () -> assertBusiness(() -> service.softDeleteFiles(targets), ErrorCode.FORBIDDEN));
+        assertThat(deleted(fixture.signatureId())).isEqualTo("N");
+        assertThat(deleted(id)).isEqualTo("N");
+        verifyNoInteractions(storage);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "operator", "admin"})
+    void rawAiDocumentLocationsCannotServeRetainedFiles(String actor) throws Exception {
+        String name = "synthetic-order-" + fixture.roomId() + ".xlsx";
+        for (String dir : List.of("AI_DOCUMENT/" + fixture.roomId(), "aI_dOcUmEnT/" + fixture.roomId(),
+                "ai/order_forms", "order_forms")) {
+            Path file = STATIC_ROOT.resolve(dir).resolve(name);
+            Files.createDirectories(file.getParent());
+            Files.write(file, AI_DOCUMENT_BYTES);
+            for (String method : List.of("GET", "HEAD")) {
+                Reply reply = request(method, "/static-files/" + dir + "/" + name + "?download=1",
+                        token(actor), null, null);
+                assertThat(reply.status()).isBetween(400, 499);
+                assertNoAiDocumentContent(reply);
+            }
+        }
+        verifyNoInteractions(storage);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"anonymous", "guest", "other", "owner", "operator", "admin"})
+    void privateAiDocumentRoutesDenyEveryActorIncludingAnInternalTokenHolder(String actor) throws Exception {
+        byte[] input = json.writeValueAsBytes(Map.of("userId", fixture.ownerId()));
+        for (String route : List.of("/ai/payment/order-form", "/ai/payment/summary")) {
+            assertDenied(request("POST", route, token(actor), input, "application/json"), actor);
+        }
+        assertDenied(request("GET", "/ai/payment/order-form/download/" + AI_DOCUMENT_NAME,
+                token(actor), null, null), actor);
+        Multipart upload = uploadBody("AI_DOCUMENT", fixture.roomId(), AI_DOCUMENT_NAME,
+                XLSX_MEDIA_TYPE, AI_DOCUMENT_BYTES);
+        long before = aiDocumentCount();
+        assertDenied(request("POST", "/v1/ai/files/upload", token(actor), upload.body(), upload.contentType(),
+                Map.of("X-Internal-Token", AI_INTERNAL_TOKEN)), actor);
+        assertThat(aiDocumentCount()).isEqualTo(before);
+        verifyNoInteractions(storage, aiGateway);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = AiIntent.class, names = {"PAYMENT_ORDER_FORM_CREATE", "PAYMENT_SUMMARY_DOCUMENT"})
+    void internalDocumentIntentsAreDeniedBeforeReachingTheAiGateway(AiIntent intent) {
+        withActor("operator", () -> assertBusiness(() -> aiIntents.route(AiGatewayRequest.builder()
+                .intent(intent).userId(fixture.operatorId()).slots(Map.of()).build()), ErrorCode.FORBIDDEN));
+        verifyNoInteractions(storage, aiGateway);
+    }
+
+    @Test
+    void ordinaryTextChatStillUsesTheAuthenticatedMemberAndAiGateway() throws Exception {
+        assertError(request("POST", "/ai/payment/status", token("other"),
+                json.writeValueAsBytes(Map.of()), "application/json"), ErrorCode.PAYMENT_NOT_FOUND);
+        verifyNoInteractions(aiGateway);
+        when(aiGateway.execute(any(AiGatewayRequest.class))).thenReturn(AiGatewayResponse.builder()
+                .answer("Synthetic general chat answer").metadata(Map.of()).build());
+        byte[] input = json.writeValueAsBytes(Map.of("prompt", "Synthetic general chat question",
+                "userId", fixture.ownerId()));
+        JsonNode result = data(request("POST", "/ai/chat", token("other"), input, "application/json"));
+        assertThat(result.path("answer").asText()).isEqualTo("Synthetic general chat answer");
+        verify(aiGateway).execute(org.mockito.ArgumentMatchers.argThat(call ->
+                call.getIntent() == AiIntent.GENERAL_QA && fixture.otherId().equals(call.getUserId())));
         verifyNoInteractions(storage);
     }
 
@@ -553,10 +680,16 @@ class ContractFileAccessIntegrationTest {
     }
 
     private Reply request(String method, String path, String token, byte[] body, String contentType) throws Exception {
+        return request(method, path, token, body, contentType, Map.of());
+    }
+
+    private Reply request(String method, String path, String token, byte[] body, String contentType,
+            Map<String, String> extraHeaders) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api" + path))
                 .timeout(Duration.ofSeconds(15)).header("Accept", "*/*");
         if (token != null) request.header("Authorization", "Bearer " + token);
         if (contentType != null) request.header("Content-Type", contentType);
+        extraHeaders.forEach(request::header);
         request.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
         HttpResponse<byte[]> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
         return new Reply(response.statusCode(), response.body(), response.headers().map());
@@ -610,6 +743,14 @@ class ContractFileAccessIntegrationTest {
         assertThat(text).doesNotContain("\"filePath\"", "\"renameFilename\"", "\"viewUrl\"", "synthetic-storage.example");
     }
 
+    private static void assertNoAiDocumentContent(Reply reply) {
+        assertThat(Arrays.equals(reply.body(), AI_DOCUMENT_BYTES)).isFalse();
+        assertThat(reply.header("content-type")).doesNotContain("spreadsheetml");
+        assertThat(reply.header("content-disposition")).isEmpty();
+        assertThat(new String(reply.body(), StandardCharsets.UTF_8))
+                .doesNotContain("\"filePath\"", "\"renameFilename\"", "\"viewUrl\"", "synthetic-storage.example");
+    }
+
     private static void assertNoPrivateContent(Reply reply) {
         assertThat(Arrays.equals(reply.body(), PRIVATE_PNG)).isFalse();
         String text = new String(reply.body(), StandardCharsets.UTF_8);
@@ -634,6 +775,18 @@ class ContractFileAccessIntegrationTest {
     private long fileCount(int contractId) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM files WHERE file_parent_type='CONTRACT' AND file_parent_id=?",
                 Long.class, contractId);
+    }
+
+    private long aiDocumentCount() {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM files WHERE file_parent_type='AI_DOCUMENT' AND file_parent_id=?",
+                Long.class, fixture.roomId());
+    }
+
+    private UploadFile seedAiDocument() {
+        int parent = fixture.roomId();
+        return files.saveAndFlush(UploadFile.builder().fileParentType("AI_DOCUMENT").fileParentId(parent)
+                .filePath("AI_DOCUMENT/" + parent + "/synthetic").originFilename(AI_DOCUMENT_NAME)
+                .renameFilename(AI_DOCUMENT_NAME).fileSize(AI_DOCUMENT_BYTES.length).fileType(".xlsx").sortOrder(0).build());
     }
 
     private static User user(UserRepository users, String id, UserRole role, String passwordHash) {
@@ -666,15 +819,20 @@ class ContractFileAccessIntegrationTest {
     }
 
     private static Multipart uploadBody(int contractId) throws IOException {
+        return uploadBody("CONTRACT", contractId, "synthetic-signature.png", "image/png", PRIVATE_PNG);
+    }
+
+    private static Multipart uploadBody(String type, int parentId, String name, String mediaType, byte[] content)
+            throws IOException {
         String boundary = "SyntheticContractBoundary" + UUID.randomUUID().toString().replace("-", "");
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        for (var entry : Map.of("fileParentType", "CONTRACT", "fileParentId", String.valueOf(contractId)).entrySet()) {
+        for (var entry : Map.of("fileParentType", type, "fileParentId", String.valueOf(parentId)).entrySet()) {
             bytes.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + entry.getKey()
                     + "\"\r\n\r\n" + entry.getValue() + "\r\n").getBytes(StandardCharsets.UTF_8));
         }
-        bytes.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"files\"; filename=\"synthetic-signature.png\"\r\n"
-                + "Content-Type: image/png\r\n\r\n").getBytes(StandardCharsets.UTF_8));
-        bytes.write(PRIVATE_PNG);
+        bytes.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"files\"; filename=\"" + name + "\"\r\n"
+                + "Content-Type: " + mediaType + "\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+        bytes.write(content);
         bytes.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
         return new Multipart(bytes.toByteArray(), "multipart/form-data; boundary=" + boundary);
     }
@@ -690,6 +848,7 @@ class ContractFileAccessIntegrationTest {
             String parent = invocation.getArgument(0);
             if (parent.startsWith("CONTRACT/")) return new ByteArrayInputStream(PRIVATE_PNG);
             if (parent.startsWith("ROOM/")) return new ByteArrayInputStream(PUBLIC_PNG);
+            if (parent.startsWith("AI_DOCUMENT/")) return new ByteArrayInputStream(AI_DOCUMENT_BYTES);
             throw new FileNotFoundException("Unknown synthetic storage key");
         });
     }

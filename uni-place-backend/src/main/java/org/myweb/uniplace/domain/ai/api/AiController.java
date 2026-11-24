@@ -18,7 +18,6 @@ import org.myweb.uniplace.domain.ai.api.dto.request.ComplainPriorityRequest;
 import org.myweb.uniplace.domain.ai.api.dto.request.ContractAnomalyRequest;
 import org.myweb.uniplace.domain.ai.api.dto.request.ContractRecommendRequest;
 import org.myweb.uniplace.domain.ai.api.dto.request.PaymentOrderSuggestionRequest;
-import org.myweb.uniplace.domain.ai.api.dto.request.PaymentOrderFormCreateRequest;
 import org.myweb.uniplace.domain.ai.api.dto.request.PaymentStatusSummaryRequest;
 import org.myweb.uniplace.domain.ai.api.dto.request.PaymentSummaryRequest;
 import org.myweb.uniplace.domain.ai.api.dto.request.RoomSearchRequest;
@@ -30,7 +29,6 @@ import org.myweb.uniplace.domain.ai.api.dto.response.ContractRecommendResponse;
 import org.myweb.uniplace.domain.ai.api.dto.response.PaymentSummaryResponse;
 import org.myweb.uniplace.domain.ai.api.dto.response.RoomSearchResponse;
 import org.myweb.uniplace.domain.ai.application.AiOrchestratorService;
-import org.myweb.uniplace.domain.ai.application.gateway.AiOrderFormDownloadProxy;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayRequest;
 import org.myweb.uniplace.domain.ai.application.gateway.dto.AiGatewayResponse;
 import org.myweb.uniplace.domain.ai.domain.AiIntent;
@@ -47,10 +45,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @RestController
@@ -72,7 +67,6 @@ public class AiController {
 
     private final AiOrchestratorService aiOrchestratorService;
     private final ObjectMapper objectMapper;
-    private final AiOrderFormDownloadProxy aiOrderFormDownloadProxy;
     private final OwnershipAccess ownership;
 
     @PostMapping("/chat")
@@ -215,17 +209,6 @@ public class AiController {
     public ApiResponse<AiChatResponse> paymentOrderSuggestion(@RequestBody PaymentOrderSuggestionRequest request) {
         AiGatewayResponse response = aiOrchestratorService.handle(toGateway(request.getIntent(), request));
         return ApiResponse.ok(AiChatResponse.from(response));
-    }
-
-    @PostMapping("/payment/order-form")
-    public ApiResponse<AiChatResponse> paymentOrderForm(@RequestBody PaymentOrderFormCreateRequest request) {
-        AiGatewayResponse response = aiOrchestratorService.handle(toGateway(request.getIntent(), request));
-        return ApiResponse.ok(AiChatResponse.from(response));
-    }
-
-    @GetMapping("/payment/order-form/download/{fileName}")
-    public ResponseEntity<ByteArrayResource> downloadPaymentOrderForm(@PathVariable("fileName") String fileName) {
-        return aiOrderFormDownloadProxy.download(fileName);
     }
 
     /**

@@ -98,7 +98,7 @@ public class GeneralQaUseCase extends AbstractForwardUseCase {
             null,
             null,   // importance 필터 없음 (전체)
             normalizeKeyword(query),
-            PageRequest.of(0, 8, Sort.by(Sort.Direction.DESC, "updatedAt"))
+            PageRequest.of(0, 8)
         ).getContent();
 
         for (Notice notice : notices) {

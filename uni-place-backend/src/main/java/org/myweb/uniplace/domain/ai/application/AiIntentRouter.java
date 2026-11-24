@@ -26,6 +26,10 @@ public class AiIntentRouter {
 
         AiIntent targetIntent = request.getIntent();
         if (targetIntent == AiIntent.ADMIN_CHATBOT) throw new BusinessException(ErrorCode.FORBIDDEN);
+        // The generator's callback cannot yet bind documents to the authenticated requester.
+        if (targetIntent == AiIntent.PAYMENT_ORDER_FORM_CREATE || targetIntent == AiIntent.PAYMENT_SUMMARY_DOCUMENT) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
 
         return useCases.stream()
             .filter(useCase -> useCase.supports(targetIntent))

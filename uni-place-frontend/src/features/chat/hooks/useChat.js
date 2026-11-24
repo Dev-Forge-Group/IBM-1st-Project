@@ -7,7 +7,6 @@ import {
   clearHistory,
   sendToGemini,
   sendToBackend,
-  createOrderForm,
   SYSTEM_PROMPT,
 } from '../api/chatApi';
 import { HISTORY_WINDOW } from '../config/chatConfig';
@@ -72,22 +71,6 @@ export function useChat(params) {
   function buildActions(metadata) {
     if (!metadata || typeof metadata !== 'object') return [];
     var actions = [];
-    if (
-      Array.isArray(metadata.suggestions) &&
-      metadata.suggestions.length > 0
-    ) {
-      actions.push({
-        type: 'create_order_form',
-        label: '발주서 제작하기',
-      });
-    }
-    if (metadata.file_name) {
-      actions.push({
-        type: 'download_order_form',
-        label: '발주서 다운로드',
-        fileName: metadata.file_name,
-      });
-    }
     // ── 공용공간 예약 자동 선택 액션 ──────────────────────────────
     if (metadata.recommend_type === 'space_reserve' && metadata.space_id) {
       actions.push({
@@ -431,66 +414,6 @@ export function useChat(params) {
     [userId]
   );
 
-  var handleAction = useCallback(
-    function (msg, action) {
-      if (!action || !msg || msg.role !== 'assistant') return;
-      if (action.type === 'download_order_form' && action.fileName) {
-        window.open(
-          '/api/ai/payment/order-form/download/' +
-            encodeURIComponent(action.fileName),
-          '_blank'
-        );
-        return;
-      }
-
-      if (action.type === 'create_order_form') {
-        var metadata = msg.metadata || {};
-        var approvedItems = Array.isArray(metadata.suggestions)
-          ? metadata.suggestions
-          : [];
-        if (!approvedItems.length) return;
-
-        setLoading(true);
-        createOrderForm(
-          {
-            buildingId: metadata.building_id || null,
-            month: metadata.month || null,
-            approvedItems: approvedItems,
-          },
-          userId
-        )
-          .then(function (result) {
-            var normalized = normalizeBackendResult(result);
-            var buttons =
-              typeof result === 'object' && result !== null
-                ? result.buttons || []
-                : [];
-
-            setMessages(function (prev) {
-              return prev.concat([
-                {
-                  role: 'assistant',
-                  content: normalized.answer,
-                  buttons: buttons,
-                  ts: Date.now(),
-                  metadata: normalized.metadata,
-                  actions: buildActions(normalized.metadata),
-                },
-              ]);
-            });
-            setLoading(false);
-          })
-          .catch(function (e) {
-            setError(
-              e && e.message ? e.message : '발주서 생성 중 오류가 발생했습니다.'
-            );
-            setLoading(false);
-          });
-      }
-    },
-    [userId]
-  );
-
   return {
     messages: messages,
     input: input,
@@ -506,6 +429,5 @@ export function useChat(params) {
     setVoiceMode: setVoiceMode,
     exitMode: exitMode,
     speakMessage: speakMessage,
-    handleAction: handleAction,
   };
 }

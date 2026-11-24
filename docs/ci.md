@@ -33,7 +33,7 @@ python3 ../scripts/ci/verify_junit.py build/test-results/test
 - `JwtAuthorityIntegrationTest`: 실제 MySQL·JWT·보안 필터·HTTP에서 STAFF 권한 해제와 계약 종료·OWNER 승인/취소 뒤 기존 access token의 현재 DB 권한, STAFF의 소비자 권한 격리, generic 역할 변경으로 ADMIN/TENANT를 부여할 수 없는 경계, principal/authority 일치, guest·회원 상태·token 오류와 refresh 계약.
 - `TourHttpJourneyIntegrationTest`: RANDOM_PORT 실제 HTTP·MySQL에서 공개 탐색·생성·조회·취소와 자산 범위별 OWNER 처리 및 STAFF 거절, 복구 충돌·이력·슬롯 변화·잘못된 query400 계약. 기본 CI의 브라우저 실행은 포함하지 않으며 로컬 opt-in 브라우저 검증은 별도 증거로 남긴다.
 - `TourLookupPaginationIntegrationTest`: 실제 HTTP·MySQL에서 상태 필터를 페이지 전에 적용한 content/count·정렬, 전화/PIN 경계와 alias·PIN 비노출, 유효한 빈 필터·페이지 범위·기존 오류 및 취소 후 페이지 감소.
-- `ContractFileAccessIntegrationTest`: 실제 JWT·HTTP·MySQL에서 CONTRACT 파일의 본인 소비자/승인된 계약 당사자 OWNER read/write, STAFF 거절과 구 관리자 API 폐쇄, 권한 취소·삭제 파일·static 우회 차단·proxy URL·private cache 및 공개 ROOM 조회를 확인한다. Storage/정적 bytes는 합성 fixture만 사용한다.
+- `ContractFileAccessIntegrationTest`: 실제 JWT·HTTP·MySQL에서 CONTRACT 파일의 본인 소비자/승인된 계약 당사자 OWNER read/write, STAFF 거절과 구 관리자 API 폐쇄, 권한 취소·삭제 파일·static 우회 차단·proxy URL·private cache 및 공개 ROOM 조회를 확인한다. 기존 AI 생성 문서의 조회·변경, 섞인 삭제 요청, XLSX 생성·다운로드도 차단되는지 확인한다. 파일과 AI 응답은 합성 fixture만 사용한다.
 - `ContractCreateValidationIntegrationTest`: 실제 JWT·HTTP·MySQL에서 검증된 운영자가 있는 방의 계약 납부일 1–31·필수 비어 있지 않은 서명, 저장·파일·알림 이전 거절과 직접 서비스 호출, 유효한 경계값·기존 기간/충돌 오류를 검사한다. Storage·문서 생성·외부 알림은 합성 fixture로 격리한다.
 - `ResidentCreationTransactionIntegrationTest`: 실제 JWT·자산/계약 당사자 범위의 OWNER HTTP·MySQL에서 수동 입주자 생성·commit·조회·순차 재요청, 매핑/입력/권한 거절을 검사한다. 같은 외부 쓰기 트랜잭션의 미커밋 계약과 등록을 읽고 독립 JDBC 연결의 비가시성·rollback을 확인한다.
 - `SpaceReservationConcurrencyIntegrationTest`: 실제 MySQL의 활성 슬롯 유일성, 날짜가 유효한 계약·일치 입주자와 검증된 운영자, 동시 생성과 OWNER 상태 변경, 취소·종료 후 재예약.

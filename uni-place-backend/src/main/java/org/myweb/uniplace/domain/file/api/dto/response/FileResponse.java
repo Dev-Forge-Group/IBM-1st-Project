@@ -32,12 +32,13 @@ public class FileResponse {
     private String adminDownloadUrl;
 
     /**
-     * Property and contract visibility can change after upload, so their URLs always recheck access.
+     * Protected files use a proxy that rechecks access before serving bytes.
      * Other domains retain the configured local/S3 URL contract.
      */
     public static FileResponse fromEntity(UploadFile e, StorageService storage) {
         if (e.getFileParentType() != null
-                && Set.of("CONTRACT", "ROOM", "BUILDING", "SPACE").contains(e.getFileParentType().trim().toUpperCase(Locale.ROOT))) {
+                && Set.of("CONTRACT", "ROOM", "BUILDING", "SPACE", "AI_DOCUMENT")
+                        .contains(e.getFileParentType().trim().toUpperCase(Locale.ROOT))) {
             return fromEntity(e);
         }
         Integer id = e.getFileId();

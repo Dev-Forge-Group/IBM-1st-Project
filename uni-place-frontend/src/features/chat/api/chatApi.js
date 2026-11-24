@@ -214,34 +214,6 @@ return {
 };
 }
 
-export async function createOrderForm(payload, userId) {
-  var res = await api.post('/ai/payment/order-form', {
-    userId: userId != null ? String(userId) : null,
-    buildingId: payload && payload.buildingId != null ? payload.buildingId : null,
-    month: payload && payload.month ? payload.month : null,
-    approved: true,
-    approvedItems:
-      payload && Array.isArray(payload.approvedItems)
-        ? payload.approvedItems
-        : [],
-    supplierName: payload && payload.supplierName ? payload.supplierName : null,
-    supplierContact:
-      payload && payload.supplierContact ? payload.supplierContact : null,
-  });
-
-  var data = res && res.data && res.data.data ? res.data.data : {};
-  var metadata = data.metadata || {};
-  var buttons = Array.isArray(metadata.action_buttons)
-    ? metadata.action_buttons
-    : [];
-
-  return {
-    answer: data.answer || '발주서가 생성되었습니다.',
-    metadata,
-    buttons,
-  };
-}
-
 // ── 대화 맥락에서 슬롯 자동 추출 ──────────────────────────────
 // 후속 질문에서 건물명을 직접 추출하거나 이전 AI 답변에서 인계
 // 건물명 추출은 백엔드(DB 목록 기반)에서 처리하므로

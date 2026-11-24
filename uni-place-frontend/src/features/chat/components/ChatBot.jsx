@@ -95,6 +95,36 @@ function extractLatestTourPrefill(allMessages) {
   return {};
 }
 
+const AI_DOCUMENT_ROUTE =
+  /^(?:\/api)?\/(?:ai\/payment\/order-form|v1\/ai\/payments\/order-forms|(?:static-files\/)?(?:ai_document|ai\/order_forms|order_forms))(?:\/|$)/i;
+const FILE_ROUTE = /^(?:\/api)?\/files\/(\d+)(?:\/(?:view|download))?\/?$/i;
+const GENERATED_XLSX = /^(?:purchase_order|billing_report|payment_summary)_.+\.xlsx$/i;
+
+function buttonPath(url) {
+  if (typeof url !== 'string' || !url.trim()) return '';
+  try {
+    return decodeURIComponent(new URL(url, 'https://uniplace.invalid').pathname);
+  } catch {
+    return '';
+  }
+}
+
+function isAvailableButton(button, metadata) {
+  const path = buttonPath(button?.url);
+  if (!path || AI_DOCUMENT_ROUTE.test(path)) return false;
+
+  const generatedDocument = metadata?.draft_type === 'payment_summary_document'
+    || [metadata?.file_name, metadata?.xlsx_file_name].some(
+      (name) => typeof name === 'string' && GENERATED_XLSX.test(name)
+    );
+  if (!generatedDocument) return true;
+
+  const file = path.match(FILE_ROUTE);
+  if (file && file[1] === String(metadata.file_id)) return false;
+  return path !== buttonPath(metadata.download_url)
+    && path !== buttonPath(metadata.view_url);
+}
+
 function ActionButtons({ buttons, onAction, allMessages }) {
   var navigate = useNavigate();
   if (!buttons || buttons.length === 0) return null;
@@ -158,7 +188,7 @@ function ActionButtons({ buttons, onAction, allMessages }) {
                   normalizedUrl.includes('sub=list') ||
                   pathOnly === '/reservations/space/list';
                 if (isList) {
-                  if (onAction) onAction(null, { type: 'space_list' });
+                  if (onAction) onAction({ type: 'space_list' });
                   return;
                 }
                 // 대화 내역에서 building_id / space_id 파싱
@@ -186,14 +216,14 @@ function ActionButtons({ buttons, onAction, allMessages }) {
                 if (!extractedBuildingId && urlParams.get('buildingId'))
                   extractedBuildingId = Number(urlParams.get('buildingId'));
                 if (onAction) {
-                  onAction(null, {
+                  onAction({
                     type: 'space_reserve',
                     spaceId: extractedSpaceId,
                     buildingId: extractedBuildingId,
                   });
                 }
               } else if (pathOnly === '/spaces') {
-                if (onAction) onAction(null, { type: 'space_list' });
+                if (onAction) onAction({ type: 'space_list' });
               } else {
                 navigate(normalizedUrl);
               }
@@ -212,7 +242,12 @@ function ActionButtons({ buttons, onAction, allMessages }) {
 
 function MessageBubble({ msg, onSpeak, onAction, allMessages }) {
   var isUser = msg.role === 'user';
-  var actions = Array.isArray(msg.actions) ? msg.actions : [];
+  var actions = Array.isArray(msg.actions)
+    ? msg.actions.filter((action) => action && action.type !== 'create_order_form' && action.type !== 'download_order_form')
+    : [];
+  var buttons = Array.isArray(msg.buttons)
+    ? msg.buttons.filter((button) => isAvailableButton(button, msg.metadata))
+    : [];
   return (
     <div className={isUser ? styles.rowUser : styles.rowAssistant}>
       {!isUser && (
@@ -237,7 +272,7 @@ function MessageBubble({ msg, onSpeak, onAction, allMessages }) {
           {msg.content}
         </div>
         {!isUser &&
-          (actions.length > 0 || (msg.buttons && msg.buttons.length > 0)) && (
+          (actions.length > 0 || buttons.length > 0) && (
             <div className={styles.actionRow}>
               {actions.length > 0 &&
                 actions.map(function (action, index) {
@@ -246,7 +281,7 @@ function MessageBubble({ msg, onSpeak, onAction, allMessages }) {
                       key={(action.type || 'action') + '-' + index}
                       className={styles.actionBtn}
                       onClick={function () {
-                        if (onAction) onAction(msg, action);
+                        if (onAction) onAction(action);
                       }}
                     >
                       {action.label}
@@ -254,9 +289,9 @@ function MessageBubble({ msg, onSpeak, onAction, allMessages }) {
                   );
                 })}
 
-              {msg.buttons && msg.buttons.length > 0 && (
+              {buttons.length > 0 && (
                 <ActionButtons
-                  buttons={msg.buttons}
+                  buttons={buttons}
                   onAction={onAction}
                   allMessages={allMessages}
                 />
@@ -388,7 +423,6 @@ export default function ChatBot({ user, geminiApiKey, useBackend }) {
   var setVoiceMode = chat.setVoiceMode;
   var exitMode = chat.exitMode;
   var speakMessage = chat.speakMessage;
-  var handleAction = chat.handleAction;
 
   React.useEffect(
     function () {
@@ -441,11 +475,8 @@ export default function ChatBot({ user, geminiApiKey, useBackend }) {
   }
 
   // ── 액션 버튼 핸들러 ─────────────────────────────────────────
-  function onActionClick(msg, action) {
+  function onActionClick(action) {
     if (!action) return;
-
-    // 기존 발주서 액션
-    if (handleAction) handleAction(msg, action);
 
     // 공용공간 예약 → 마이페이지 공용시설 탭 (모달)
     if (action.type === 'space_reserve') {
