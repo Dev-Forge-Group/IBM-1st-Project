@@ -15,6 +15,8 @@ import styles from './SpaceReservationCreate.module.css';
 import { toKoreanMessage } from '../../../app/http/errorMapper';
 import { formatBuildingDisplay } from '../../../shared/utils/branchLabel';
 
+const EMPTY_ITEMS = [];
+
 /**
  * inlineMode=true  → Header/Footer/topBar 없이 컨텐츠만 렌더 (마이페이지 탭 용)
  * inlineMode=false → 기존 독립 페이지로 렌더 (직접 URL 접근 시)
@@ -60,20 +62,23 @@ export default function SpaceReservationCreate({
   const [bLoading, setBLoading] = useState(false);
   const [bError, setBError] = useState('');
   const [selectedBuilding, setSelectedBuilding] = useState(null);
+  const buildingId = Number(selectedBuilding?.buildingId) || null;
 
   const [date, setDate] = useState(
     initDateFromAi ?? new Date().toISOString().slice(0, 10)
   );
-  const [spacesPage, setSpacesPage] = useState(null);
-  const [spacesLoading, setSpacesLoading] = useState(false);
-  const [spacesError, setSpacesError] = useState('');
+  const [availability, setAvailability] = useState(null);
   const [submitError, setSubmitError] = useState('');
-  const spaces = useMemo(() => spacesPage?.content ?? [], [spacesPage]);
+  const availabilityKey = buildingId && date ? JSON.stringify([buildingId, date]) : null;
+  const currentAvailability = availability?.key === availabilityKey ? availability : null;
+  const spaces = currentAvailability?.spaces ?? EMPTY_ITEMS;
+  const spacesLoading = Boolean(availabilityKey && !currentAvailability);
+  const spacesError = currentAvailability?.error;
 
   const [spaceId, setSpaceId] = useState(
     initSpaceId ? String(initSpaceId) : ''
   );
-  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [chosenSlot, setChosenSlot] = useState(null);
   const [srNoPeople, setSrNoPeople] = useState(1);
 
   // AI 추천 시간 자동 선택 (availableSlots 로드 후)
@@ -125,97 +130,70 @@ export default function SpaceReservationCreate({
   useEffect(() => {
     if (!initBuildingId || !buildings.length) return;
     const found = buildings.find(
-      (b) => Number(b.buildingId) === initBuildingId
+      (b) => Number(b.buildingId) === Number(initBuildingId)
     );
-    if (found && !selectedBuilding) setSelectedBuilding(found);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (found) setSelectedBuilding((previous) => previous ?? found);
   }, [buildings, initBuildingId]);
 
-  const loadSpaces = async (buildingId, targetDate) => {
-    if (!buildingId || !targetDate) return;
-    setSpacesLoading(true);
-    setSpacesError('');
-    try {
-      const page = await reservationApi.reservableSpaces({
-        buildingId,
-        date: targetDate,
-        page: 1,
-        size: 50,
-        sort: 'spaceId',
-        direct: 'DESC',
+  useEffect(() => {
+    setAvailability(null);
+    setChosenSlot(null);
+    setSubmitError('');
+    if (!availabilityKey) return;
+
+    let current = true;
+    reservationApi.reservableSpaces({
+      buildingId, date, page: 1, size: 50, sort: 'spaceId', direct: 'DESC',
+    }).then((page) => {
+      if (!current) return;
+      const results = (page?.content ?? EMPTY_ITEMS).filter((space) => Number(space.buildingId) === buildingId);
+      const ids = results.map((space) => String(space.spaceId));
+      setAvailability({ key: availabilityKey, spaces: results });
+      setSpaceId((previous) => {
+        if (ids.includes(previous)) return previous;
+        if (ids.includes(String(initSpaceId))) return String(initSpaceId);
+        return ids[0] ?? '';
       });
-      setSpacesPage(page);
-    } catch (e) {
-      setSpacesError(e?.message || '공용공간 조회 실패');
-      setSpacesPage(null);
-    } finally {
-      setSpacesLoading(false);
-    }
-  };
+    }).catch((error) => {
+      if (current) setAvailability({ key: availabilityKey, error: error?.message || '공용공간 조회 실패' });
+    });
+    return () => { current = false; };
+  }, [availabilityKey, buildingId, date, initSpaceId]);
 
-  useEffect(() => {
-    if (!selectedBuilding?.buildingId) return;
-    setSelectedSlot(null);
-    loadSpaces(Number(selectedBuilding.buildingId), date);
-    if (
-      initBuildingId &&
-      Number(selectedBuilding.buildingId) !== initBuildingId
-    )
-      setSpaceId('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBuilding, date]);
-
-  useEffect(() => {
-    if (!spaces.length) return;
-    if (initSpaceId && spaces.find((s) => s.spaceId === initSpaceId)) {
-      setSpaceId(String(initSpaceId));
-    } else if (!spaceId) {
-      setSpaceId(String(spaces[0].spaceId));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spaces]);
-
-  // currentSpace를 AI 추천 시간 useEffect보다 먼저 선언 (참조 오류 방지)
-  const currentSpace = useMemo(
-    () => spaces.find((s) => String(s.spaceId) === String(spaceId)),
-    [spaces, spaceId]
+  const currentSpace = spaces.find((space) => String(space.spaceId) === spaceId);
+  const availableSlots = useMemo(
+    () => (currentSpace?.availableSlots ?? EMPTY_ITEMS).filter((slot) =>
+      slot.startAt?.slice(0, 10) === date && slot.endAt?.slice(0, 10) === date),
+    [currentSpace, date]
   );
-  const availableSlots = currentSpace?.availableSlots ?? [];
+  const selectedSlot = availableSlots.includes(chosenSlot) ? chosenSlot : null;
 
-  // AI 추천 시간 자동 선택: availableSlots 로드 후 startAt 매칭
+  // Apply the recommendation only to its original booking context.
   useEffect(() => {
     if (!initStartAt || !initEndAt || aiSlotAppliedRef.current) return;
-    if (!currentSpace?.availableSlots?.length) return;
+    if (date !== initDateFromAi) return;
+    if (initBuildingId && Number(initBuildingId) !== buildingId) return;
+    if (initSpaceId && String(initSpaceId) !== spaceId) return;
 
     const targetStart = initStartAt.replace('T', ' ').slice(0, 16);
-    const match = currentSpace.availableSlots.find((s) => {
-      const sStart = (s.startAt || '').replace('T', ' ').slice(0, 16);
-      return sStart === targetStart;
-    });
+    const targetEnd = initEndAt.replace('T', ' ').slice(0, 16);
+    const match = availableSlots.find((slot) =>
+      slot.startAt.replace('T', ' ').slice(0, 16) === targetStart
+      && slot.endAt.replace('T', ' ').slice(0, 16) === targetEnd);
     if (match) {
-      setSelectedSlot(match);
+      setChosenSlot(match);
       aiSlotAppliedRef.current = true;
     }
-  }, [currentSpace, initStartAt, initEndAt]);
+  }, [availableSlots, buildingId, date, initBuildingId, initDateFromAi, initEndAt, initSpaceId,
+    initStartAt, spaceId]);
 
-  useEffect(() => {
-    setSelectedSlot(null);
-  }, [spaceId]);
-
-
-  const canSubmit = useMemo(() => {
-    if (!selectedBuilding?.buildingId) return false;
-    if (!spaceId) return false;
-    if (!selectedSlot) return false;
-    if (!srNoPeople || srNoPeople < 1) return false;
-    return true;
-  }, [selectedBuilding, spaceId, selectedSlot, srNoPeople]);
+  const canSubmit = Boolean(currentSpace && selectedSlot && Number.isInteger(srNoPeople) && srNoPeople > 0);
 
   const [submitLoading, setSubmitLoading] = useState(false);
   const submitRef = useRef(false);
 
   const doCreateReservation = async () => {
-    if (submitRef.current) return;
+    if (!canSubmit || submitRef.current) return;
     submitRef.current = true;
     setSubmitLoading(true);
     const maxCap = currentSpace?.spaceCapacity;
@@ -227,8 +205,8 @@ export default function SpaceReservationCreate({
     }
     try {
       await reservationApi.createSpaceReservation({
-        buildingId: Number(selectedBuilding.buildingId),
-        spaceId: Number(spaceId),
+        buildingId,
+        spaceId: Number(currentSpace.spaceId),
         srStartAt: selectedSlot.startAt,
         srEndAt: selectedSlot.endAt,
         srNoPeople: Number(srNoPeople),
@@ -248,7 +226,6 @@ export default function SpaceReservationCreate({
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!canSubmit || submitRef.current) return;
     await doCreateReservation();
   };
 
@@ -335,9 +312,13 @@ export default function SpaceReservationCreate({
             )}
           <select
             className={styles.select}
-            value={spaceId}
-            onChange={(e) => setSpaceId(e.target.value)}
-            disabled={!selectedBuilding}
+            value={currentSpace ? spaceId : ''}
+            onChange={(e) => {
+              setSpaceId(e.target.value);
+              setChosenSlot(null);
+              setSubmitError('');
+            }}
+            disabled={!selectedBuilding || spacesLoading}
           >
             <option value="">선택하세요</option>
             {spaces.map((s) => (
@@ -361,7 +342,7 @@ export default function SpaceReservationCreate({
           <TimeSlotButtons
             slots={availableSlots}
             selectedKey={selectedSlot ? String(selectedSlot.startAt) : ''}
-            onSelect={setSelectedSlot}
+            onSelect={setChosenSlot}
           />
         </div>
       </section>

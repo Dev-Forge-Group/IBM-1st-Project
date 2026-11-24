@@ -6,6 +6,8 @@
 
 신규 투어는 같은 날짜에 시작·종료해야 한다. 다른 날짜의 시각만 고정 슬롯과 일치해 25시간 예약이 만들어지던 경로는 기존 `TOUR_RESERVATION_INVALID_TIME`으로 거절한다. null·종료 순서 검사를 먼저 유지하며, 같은 날의 비고정 시간은 기존 `TOUR_RESERVATION_INVALID_SLOT`을 따른다. 과거 날짜 허용 여부나 전화번호·비밀번호 정책은 이 변경에서 재정의하지 않는다.
 
+공용공간 예약 화면은 현재 건물과 날짜의 응답에서 공간과 시간을 표시한다. 날짜를 바꾸면 시간 선택을 해제하고, 같은 공간이 새 목록에 있으면 공간 선택을 유지한다. 추천 시간은 해당 건물·공간·날짜의 실제 시작과 종료 시간이 일치할 때 자동 선택한다.
+
 `ReservationAvailabilityIntegrationTest`는 실제 MySQL/Flyway와 공개 서비스를 사용해 두 제품의 비정형 이력·인접 시간·비활성 상태·다른 대상 격리·날짜 경계·정상 생성을 검사한다. property 목록 공급과 Notification/Slack은 mock한다. 기존 코드에서 6개 중 5개가 실패했고, 수정 뒤 6개 모두 통과했다. CI는 이 suite가 누락되거나 skip이면 실패한다.
 
 이번 변경은 가용 시간 조회와 입력 검증의 수선이다. 동시 요청의 최종 성공 여부를 가용 시간 목록이 보장하지는 않는다. 공용공간의 활성 슬롯 유일성과 버전은 기존 [V15 계약](space-reservation-concurrency.md)을 유지한다. 투어의 [전화 표기 호환](tour-telephone-compatibility.md)과 [관리자 복구](tour-admin-restoration.md)는 각 계약과 실제 MySQL 회귀에서 검증한다. 신규 서비스의 Tour 쓰기는 [IBM-03의 V16 guard](tour-reservation-concurrency.md)를 따르며, 일반 가용 시간 조회는 이 잠금을 사용하지 않는다. 가용 시간 수선 자체에는 새 DB 마이그레이션을 추가하지 않았다.
