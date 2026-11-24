@@ -57,6 +57,8 @@ CONTRACT·BUILDING·ROOM·SPACE 파일 URL은 `/files/{id}/view|download` proxy�
 
 직원 심사 화면은 조회한 항목의 `updatedAt`을 `expectedUpdatedAt`으로 보낸다. 그사이 신청 내용이나 다른 직원의 심사 결과가 바뀌면 서버는 `409 OWNERSHIP_409`를 반환한다. 새로고침으로 최신 내용을 확인해야 다시 처리할 수 있다. 기존 API 호출은 `reviewNote`만으로도 처리할 수 있다.
 
+회원은 확인 중인 소유주 신청의 내용을 수정할 수 있다. 이미 확인된 자산에 다시 요청하면 현재 승인 상태를 안내한다.
+
 새 계약 알림은 `/owner/contracts?contractId=...`에서 해당 계약을 연다. 목록의 계약 번호 필터에도 계약 당사자 범위가 적용된다.
 
 ## V17과 기존 데이터 전환

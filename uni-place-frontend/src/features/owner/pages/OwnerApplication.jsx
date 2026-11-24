@@ -6,16 +6,20 @@ import { hasAccountRole } from '../../../shared/auth/accountAccess';
 import styles from '../components/OwnerWorkspace.module.css';
 
 const STATUS = { NONE: '신청 전', PENDING: '확인 중', APPROVED: '승인', REJECTED: '반려' };
+const SUBMIT_LABEL = { NONE: '소유주 신청하기', PENDING: '신청 내용 수정', REJECTED: '다시 신청' };
 
 export default function OwnerApplication() {
   const { user, refresh } = useAuth();
   const [application, setApplication] = useState(null);
-  const [applicationNote, setApplicationNote] = useState('');
+  const [draftNote, setDraftNote] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [version, setVersion] = useState(0);
+  const status = application?.status || 'NONE';
+  const applicationNote = draftNote ?? application?.applicationNote ?? '';
+  const unchangedPending = status === 'PENDING' && applicationNote.trim() === application.applicationNote;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -25,7 +29,6 @@ export default function OwnerApplication() {
     ownerApi.getMyApplication(controller.signal).then((data) => {
       if (!active) return;
       setApplication(data);
-      setApplicationNote((old) => old || data?.applicationNote || '');
     }).catch((cause) => { if (active) setError(cause.message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; controller.abort(); };
@@ -33,13 +36,18 @@ export default function OwnerApplication() {
 
   async function submit(event) {
     event.preventDefault();
-    if (saving) return;
+    if (saving || unchangedPending) return;
     if (!applicationNote.trim()) { setError('소유주 확인에 필요한 신청 내용을 입력해주세요.'); return; }
     setSaving(true); setError(''); setNotice('');
     try {
       const result = await ownerApi.apply(applicationNote.trim());
       setApplication(result);
-      setNotice('소유주 신청이 접수되었습니다. 확인 결과를 기다려주세요.');
+      setDraftNote(null);
+      if (result?.status !== 'APPROVED') {
+        setNotice(status === 'PENDING'
+          ? '신청 내용을 수정했습니다.'
+          : '소유주 신청이 접수되었습니다. 확인 결과를 기다려주세요.');
+      }
       await refresh?.();
     } catch (cause) { setError(cause.message); }
     finally { setSaving(false); }
@@ -53,7 +61,6 @@ export default function OwnerApplication() {
     } catch (cause) { setError(cause.message); }
   }
 
-  const status = application?.status || 'NONE';
   return <section className={styles.panel}>
     <h1>소유주 신청</h1>
     <p>이용자 계정을 유지하면서 소유주 업무를 함께 이용할 수 있습니다. 소유주 승인 뒤에도 각 건물·호실의 소유 관계를 별도로 확인합니다.</p>
@@ -64,11 +71,10 @@ export default function OwnerApplication() {
       <p>현재 상태: <strong>{STATUS[status] || status}</strong></p>
       {application.reviewNote && <p className={styles.notice}>확인 의견: {application.reviewNote}</p>}
       {status === 'APPROVED' ? <p className={styles.notice}>소유주 확인이 완료되었습니다. 새 자산은 소유 관계 확인 후 공개됩니다.</p>
-        : status === 'PENDING' ? <p className={styles.notice}>신청을 확인하고 있습니다. 결과 확인 후 다음 업무를 진행할 수 있습니다.</p>
-          : <form onSubmit={submit} className={styles.form}>
-            <label>신청 내용<textarea value={applicationNote} onChange={(event) => setApplicationNote(event.target.value)} maxLength={2000} required disabled={saving} /></label>
+        : <form onSubmit={submit} className={styles.form}>
+            <label>신청 내용<textarea value={applicationNote} onChange={(event) => setDraftNote(event.target.value)} maxLength={2000} required disabled={saving} /></label>
             <p className={styles.muted}>소유주 확인 방법과 담당자가 확인할 수 있는 참고 내용을 입력해주세요. 비밀번호는 입력하지 마세요.</p>
-            <button className={styles.button} type="submit" disabled={saving}>{saving ? '신청 중…' : status === 'REJECTED' ? '다시 신청' : '소유주 신청하기'}</button>
+            <button className={styles.button} type="submit" disabled={saving || unchangedPending}>{saving ? '저장 중…' : SUBMIT_LABEL[status] || SUBMIT_LABEL.NONE}</button>
           </form>}
     </>}
     <div className={styles.actions}>

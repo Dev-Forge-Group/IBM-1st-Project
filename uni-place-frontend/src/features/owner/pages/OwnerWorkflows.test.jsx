@@ -44,6 +44,25 @@ describe('owner qualification, asset verification and staff review workflows', (
     await waitFor(() => expect(api.apply).toHaveBeenCalledWith('Corrected synthetic note'));
   });
 
+  it('saves a correction while qualification is pending and prevents an unchanged resubmission', async () => {
+    api.getMyApplication.mockResolvedValue({ status: 'PENDING', applicationNote: 'Original application evidence' });
+    api.apply.mockResolvedValue({ status: 'PENDING', applicationNote: 'Corrected application evidence' });
+    view(OwnerApplication);
+
+    const note = await screen.findByLabelText('신청 내용');
+    const save = screen.getByRole('button', { name: '신청 내용 수정' });
+    expect(note).toHaveValue('Original application evidence');
+    expect(save).toBeDisabled();
+    fireEvent.change(note, { target: { value: '  Corrected application evidence  ' } });
+    fireEvent.click(save);
+
+    await screen.findByText('신청 내용을 수정했습니다.');
+    expect(api.apply).toHaveBeenCalledTimes(1);
+    expect(api.apply).toHaveBeenCalledWith('Corrected application evidence');
+    expect(note).toHaveValue('Corrected application evidence');
+    expect(await screen.findByRole('button', { name: '신청 내용 수정' })).toBeDisabled();
+  });
+
   it('retries a failed status lookup and refreshes effective roles after staff approval', async () => {
     api.getMyApplication.mockRejectedValueOnce(new Error('Synthetic lookup failure')).mockResolvedValue({ status: 'APPROVED' });
     const rendered = view(OwnerApplication); await screen.findByRole('alert');
@@ -81,6 +100,23 @@ describe('owner qualification, asset verification and staff review workflows', (
     view(OwnerAssetClaims); await screen.findByText('반려'); fireEvent.click(screen.getByRole('button', { name: '이 자산의 확인 정보 입력' }));
     expect(screen.getByLabelText('대상 종류')).toHaveValue('ROOM'); expect(screen.getByLabelText('대상 번호')).toHaveValue(42);
     expect(screen.getByText('확인 의견: Synthetic correction needed')).toBeInTheDocument();
+  });
+
+  it('shows the approved state when the server returns an existing active asset claim', async () => {
+    const active = { ...claim, status: 'ACTIVE' };
+    api.getAssetClaims.mockResolvedValue([active]);
+    api.claimAsset.mockResolvedValue(active);
+    render(<MemoryRouter initialEntries={['/owner/claims?resourceType=BUILDING&resourceId=31']}><OwnerAssetClaims /></MemoryRouter>);
+    await screen.findByText('확인 완료');
+    fireEvent.change(screen.getByLabelText('확인 참고 정보'), { target: { value: 'Synthetic duplicate claim' } });
+    fireEvent.click(screen.getByRole('button', { name: '소유 관계 확인 요청', exact: true }));
+
+    await screen.findByText('이미 소유 관계가 확인된 자산입니다.');
+    expect(screen.queryByText(/확인 요청이 접수되었습니다/)).not.toBeInTheDocument();
+    expect(api.claimAsset).toHaveBeenCalledTimes(1);
+    expect(api.claimAsset).toHaveBeenCalledWith({
+      resourceType: 'BUILDING', resourceId: '31', proofReference: 'Synthetic duplicate claim',
+    });
   });
 
   it('prefills the exact draft asset from a property list link without requesting approval automatically', async () => {

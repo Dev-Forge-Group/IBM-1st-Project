@@ -32,8 +32,10 @@ export default function OwnerAssetClaims() {
     if (!form.proofReference.trim()) { setError('소유 관계를 확인할 수 있는 참고 정보를 입력해주세요.'); return; }
     setSaving(true); setError(''); setNotice('');
     try {
-      await ownerApi.claimAsset({ ...form, proofReference: form.proofReference.trim() });
-      setNotice('소유 관계 확인 요청이 접수되었습니다. 확인이 완료되면 공개·관리 권한에 반영됩니다.');
+      const result = await ownerApi.claimAsset({ ...form, proofReference: form.proofReference.trim() });
+      setNotice(result?.status === 'ACTIVE'
+        ? '이미 소유 관계가 확인된 자산입니다.'
+        : '소유 관계 확인 요청이 접수되었습니다. 확인이 완료되면 공개·관리 권한에 반영됩니다.');
       setVersion((value) => value + 1);
     } catch (cause) { setError(cause.message); }
     finally { setSaving(false); }
