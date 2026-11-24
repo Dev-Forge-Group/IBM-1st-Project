@@ -76,11 +76,26 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and Push
+        id: publish
         uses: docker/build-push-action@v6
         with:
           context: ./uni-place-backend
           file: ./uni-place-backend/Dockerfile
           push: true
+          labels: org.opencontainers.image.revision=${{ github.sha }}
           tags: |
             ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/uniplace-backend:${{ needs.makeTagAndRelease.outputs.tag_name }}
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/uniplace-backend:${{ github.sha }}
             ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/uniplace-backend:latest
+
+      - name: Record the published backend image
+        env:
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+          RELEASE_TAG: ${{ needs.makeTagAndRelease.outputs.tag_name }}
+        run: |
+          {
+            printf '### Backend image\n\n'
+            printf -- '- Commit `%s`\n' "$GITHUB_SHA"
+            printf -- '- Release tag `%s`\n' "$RELEASE_TAG"
+            printf -- '- Published digest `%s`\n' "$IMAGE_DIGEST"
+          } >> "$GITHUB_STEP_SUMMARY"
