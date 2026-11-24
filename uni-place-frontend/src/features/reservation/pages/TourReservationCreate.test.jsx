@@ -119,6 +119,29 @@ describe('tour creation keeps slots within the current building, room and date',
 
   afterEach(() => { cleanup(); });
 
+  it.each([true, false])('explains an unavailable operator and resets the reason when a different room is selected (inline %s)', async (inlineMode) => {
+    reservations.reservableRooms.mockResolvedValue({
+      content: [{ roomId: 11, roomNo: 101 }, { roomId: 12, roomNo: 102 }],
+    });
+    reservations.reservableTourSlots.mockImplementation(({ roomId, date }) => Promise.resolve(
+      roomId === 11
+        ? { availableSlots: [], unavailableReason: 'TOUR_RSV_400_7' }
+        : slotPage(date, 'Verified 13:00', 13)
+    ));
+    renderBooking({ inlineMode });
+
+    const reason = '소유 관계 확인 후 방문을 예약할 수 있습니다.';
+    expect(await screen.findByText(reason)).toHaveAttribute('role', 'status');
+    fillVisitor();
+    expect(bookingButton()).toBeDisabled();
+    expect(reservations.createTourReservation).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '12' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Verified 13:00' }));
+    expect(screen.queryByText(reason)).not.toBeInTheDocument();
+    expect(bookingButton()).toBeEnabled();
+  });
+
   it.each([
     ['inline conflict', true, 409, 'TOUR_RSV_409_1', '이미 예약된 시간대와 겹칩니다. 다른 시간을 선택해주세요.'],
     ['standalone conflict', false, 409, 'TOUR_RSV_409_1', '이미 예약된 시간대와 겹칩니다. 다른 시간을 선택해주세요.'],

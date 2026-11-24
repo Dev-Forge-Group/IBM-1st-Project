@@ -75,8 +75,10 @@ export default function TourReservationCreate({
   const verifiedRoomId = selectedRoomInfo ? Number(selectedRoomInfo.roomId) : null;
   const slotQueryKey = buildingId && verifiedRoomId && date
     ? JSON.stringify([buildingId, verifiedRoomId, date]) : null;
-  const slots = slotsResult?.key === slotQueryKey
-    ? slotsResult.slots : EMPTY_ITEMS;
+  const currentSlotsResult = slotsResult?.key === slotQueryKey ? slotsResult : null;
+  const unavailableReason = currentSlotsResult?.unavailableReason;
+  const slotUnavailableMessage = unavailableReason ? toKoreanMessage({ errorCode: unavailableReason }) : '';
+  const slots = unavailableReason ? EMPTY_ITEMS : currentSlotsResult?.slots ?? EMPTY_ITEMS;
   const selectedSlot = slotSelection?.key === slotQueryKey
     && slots.includes(slotSelection.slot) ? slotSelection.slot : null;
   const setSelectedSlot = useCallback((slot) => {
@@ -181,7 +183,7 @@ export default function TourReservationCreate({
         if (!current) return;
         const availableSlots = (res?.availableSlots ?? []).filter((slot) =>
           slot.startAt?.slice(0, 10) === date && slot.endAt?.slice(0, 10) === date);
-        setSlotsResult({ key: slotQueryKey, slots: availableSlots });
+        setSlotsResult({ key: slotQueryKey, slots: availableSlots, unavailableReason: res?.unavailableReason });
       } catch (e) {
         if (!current) return;
         setSlotsError(e?.message || '슬롯 조회 실패');
@@ -379,11 +381,15 @@ export default function TourReservationCreate({
                 </p>
               )}
             {slotsError && <p className={styles.errMsg}>{slotsError}</p>}
-            <TimeSlotButtons
-              slots={slots}
-              selectedKey={selectedSlot ? String(selectedSlot.startAt) : ''}
-              onSelect={setSelectedSlot}
-            />
+            {slotUnavailableMessage ? (
+              <p className={styles.mutedMsg} role="status">{slotUnavailableMessage}</p>
+            ) : (
+              <TimeSlotButtons
+                slots={slots}
+                selectedKey={selectedSlot ? String(selectedSlot.startAt) : ''}
+                onSelect={setSelectedSlot}
+              />
+            )}
           </div>
         </section>
 
@@ -686,11 +692,15 @@ export default function TourReservationCreate({
                 </p>
               )}
             {slotsError && <p className={styles.errMsg}>{slotsError}</p>}
-            <TimeSlotButtons
-              slots={slots}
-              selectedKey={selectedSlot ? String(selectedSlot.startAt) : ''}
-              onSelect={setSelectedSlot}
-            />
+            {slotUnavailableMessage ? (
+              <p className={styles.mutedMsg} role="status">{slotUnavailableMessage}</p>
+            ) : (
+              <TimeSlotButtons
+                slots={slots}
+                selectedKey={selectedSlot ? String(selectedSlot.startAt) : ''}
+                onSelect={setSelectedSlot}
+              />
+            )}
           </div>
         </section>
 

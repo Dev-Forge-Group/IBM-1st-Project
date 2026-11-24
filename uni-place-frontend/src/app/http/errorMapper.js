@@ -57,6 +57,7 @@ const ERROR_MESSAGES = {
   TOUR_RSV_400_4: '이미 취소된 예약입니다.',
   TOUR_RSV_400_5: '취소할 수 없는 예약 상태입니다.',
   TOUR_RSV_400_6: '방이 해당 건물에 속하지 않습니다.',
+  TOUR_RSV_400_7: '소유 관계 확인 후 방문을 예약할 수 있습니다.',
 
   // Space Reservation
   SPACE_RSV_404: '공용공간 예약을 찾을 수 없습니다.',

@@ -104,10 +104,10 @@ public class TourReservationServiceImpl implements TourReservationService {
             throw new BusinessException(ErrorCode.TOUR_RESERVATION_BUILDING_ROOM_MISMATCH);
         }
 
-        ownership.requireVerifiedRentalRoom(room.getRoomId());
-
-        if (room.getRoomSt() != RoomStatus.available) {
-            throw new BusinessException(ErrorCode.TOUR_RESERVATION_ROOM_UNAVAILABLE);
+        ownership.requirePublicRoom(room.getRoomId());
+        ErrorCode unavailableReason = bookingUnavailableReason(room);
+        if (unavailableReason != null) {
+            throw new BusinessException(unavailableReason);
         }
 
         reservationConflictPolicy.validateDuplicateTelTime(
@@ -333,6 +333,12 @@ public class TourReservationServiceImpl implements TourReservationService {
         ownership.requirePublicBuilding(buildingId);
         ownership.requirePublicRoom(roomId);
 
+        var response = TourReservableResponse.builder().buildingId(buildingId).roomId(roomId);
+        ErrorCode unavailableReason = bookingUnavailableReason(room);
+        if (unavailableReason != null) {
+            return response.availableSlots(List.of()).unavailableReason(unavailableReason.getCode()).build();
+        }
+
         LocalDateTime dayStart = date.atStartOfDay();
         LocalDateTime dayEnd   = date.plusDays(1).atStartOfDay();
 
@@ -355,11 +361,13 @@ public class TourReservationServiceImpl implements TourReservationService {
                                 && ts.getEndAt().isAfter(reservation.getTourStartAt())))
                 .toList();
 
-        return TourReservableResponse.builder()
-                .buildingId(buildingId)
-                .roomId(roomId)
-                .availableSlots(available)
-                .build();
+        return response.availableSlots(available).build();
     }
 
+    private ErrorCode bookingUnavailableReason(Room room) {
+        if (ownership.eligibleOwnerIdsForRoom(room.getRoomId()).isEmpty()) {
+            return ErrorCode.TOUR_RESERVATION_OWNER_UNVERIFIED;
+        }
+        return room.getRoomSt() == RoomStatus.available ? null : ErrorCode.TOUR_RESERVATION_ROOM_UNAVAILABLE;
+    }
 }

@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -581,6 +582,57 @@ class OwnerAccountPropertyIntegrationTest {
     }
 
     @Test
+    void legacyTourSlotsAndCreationFollowAssessedOperatorAndRoomAvailability() throws Exception {
+        int[] ids = new TransactionTemplate(transactions).execute(status -> {
+            Building legacy = building(buildings, "Synthetic tour pilot building");
+            return new int[]{legacy.getBuildingId(), room(rooms, legacy, 903).getRoomId()};
+        });
+        int buildingId = ids[0];
+        int roomId = ids[1];
+        LocalDate day = LocalDate.now(KST).plusDays(2);
+        String slotsPath = "/tour-reservations/slots?buildingId=" + buildingId + "&roomId=" + roomId + "&date=" + day;
+        String createPath = "/tour-reservations";
+        Map<String, Object> booking = Map.of("buildingId", buildingId, "roomId", roomId,
+                "tourStartAt", day + "T09:00:00", "tourEndAt", day + "T10:00:00",
+                "tourNm", "Synthetic visitor", "tourTel", "010-0000-0098", "tourPwd", "4826");
+
+        assertStatus(call("GET", "/rooms/" + roomId, null, null), 200);
+        assertNoTourSlots(slotsPath, "TOUR_RSV_400_7");
+        assertTourCreateError(call("POST", createPath, null, booking), "TOUR_RSV_400_7");
+        assertThat(tourCountForRoom(roomId)).isZero();
+        verifyNoInteractions(notifications, slack);
+
+        JsonNode claim = data(call("POST", "/users/me/asset-claims", token(f.owner()),
+                Map.of("resourceType", "BUILDING", "resourceId", buildingId, "proofReference", "Synthetic pilot title")));
+        assertNoTourSlots(slotsPath, "TOUR_RSV_400_7");
+        String reviewPath = "/admin/asset-claims/BUILDING/" + positiveId(claim, "membershipId");
+        JsonNode approved = data(call("POST", reviewPath + "/approve", staffToken(),
+                Map.of("reviewNote", "Synthetic title confirmed", "expectedUpdatedAt", claim.path("updatedAt"))));
+        JsonNode available = data(call("GET", slotsPath, null, null));
+        assertThat(available.hasNonNull("unavailableReason")).isFalse();
+        assertThat(available.path("availableSlots").isEmpty()).isFalse();
+        assertThat(LocalDateTime.parse(available.path("availableSlots").get(0).path("startAt").asText()))
+                .isEqualTo(day.atTime(9, 0));
+
+        jdbc.update("UPDATE rooms SET room_st='repair' WHERE room_id=?", roomId);
+        assertNoTourSlots(slotsPath, "TOUR_RSV_400_3");
+        assertTourCreateError(call("POST", createPath, null, booking), "TOUR_RSV_400_3");
+        assertThat(tourCountForRoom(roomId)).isZero();
+        jdbc.update("UPDATE rooms SET room_st='available' WHERE room_id=?", roomId);
+        int tourId = positiveId(data(call("POST", createPath, null, booking)), "tourId");
+
+        data(call("POST", reviewPath + "/reject", staffToken(),
+                Map.of("reviewNote", "Synthetic operator access revoked", "expectedUpdatedAt", approved.path("updatedAt"))));
+        assertStatus(call("GET", "/rooms/" + roomId, null, null), 200);
+        assertNoTourSlots(slotsPath, "TOUR_RSV_400_7");
+        assertTourCreateError(call("POST", createPath, null, booking), "TOUR_RSV_400_7");
+        JsonNode cancelled = data(call("PUT", createPath + "/cancel/" + tourId, null,
+                Map.of("tourTel", booking.get("tourTel"), "tourPwd", booking.get("tourPwd"))));
+        assertThat(cancelled.path("tourSt").asText()).isEqualTo("cancelled");
+        assertThat(tourCountForRoom(roomId)).isEqualTo(1);
+    }
+
+    @Test
     void ownerListsAndCountsAreScopedBeforePagination() throws Exception {
         JsonNode a = data(call("GET", "/owner/buildings?page=1&size=1", token(f.owner()), null));
         JsonNode b = data(call("GET", "/owner/buildings?page=1&size=1", token(f.otherOwner()), null));
@@ -999,6 +1051,22 @@ class OwnerAccountPropertyIntegrationTest {
     private void assertReviewConflict(Reply response) throws IOException {
         assertStatus(response, 409);
         assertThat(json.readTree(response.body()).path("errorCode").asText()).isEqualTo("OWNERSHIP_409");
+    }
+
+    private void assertNoTourSlots(String path, String reason) throws Exception {
+        JsonNode result = data(call("GET", path, null, null));
+        assertThat(result.path("availableSlots").isArray()).isTrue();
+        assertThat(result.path("availableSlots").isEmpty()).isTrue();
+        assertThat(result.path("unavailableReason").asText()).isEqualTo(reason);
+    }
+
+    private void assertTourCreateError(Reply response, String code) throws IOException {
+        assertStatus(response, 400);
+        assertThat(json.readTree(response.body()).path("errorCode").asText()).isEqualTo(code);
+    }
+
+    private int tourCountForRoom(int roomId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM room_reservation WHERE room_id=?", Integer.class, roomId);
     }
     private static int positiveId(JsonNode node, String key) { int id = node.path(key).asInt(); assertThat(id).isPositive(); return id; }
     private static JsonNode only(List<JsonNode> values) { assertThat(values).hasSize(1); return values.get(0); }

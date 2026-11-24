@@ -17,6 +17,7 @@ public class TourReservableResponse {
     private Integer roomId;
 
     private List<TimeSlotResponse> availableSlots;
+    private String unavailableReason;
 
     @Getter
     @NoArgsConstructor
