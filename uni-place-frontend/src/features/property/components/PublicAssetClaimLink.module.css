@@ -1,0 +1,9 @@
+.link {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 12px;
+  color: inherit;
+  font-size: 0.875rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

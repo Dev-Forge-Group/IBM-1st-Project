@@ -16,6 +16,7 @@ import Modal from '../../../shared/components/Modal/Modal';
 import TourReservationCreate from '../../reservation/pages/TourReservationCreate';
 import TourReservationList from '../../reservation/pages/TourReservationList';
 import { contractApi } from '../../contract/api/contractApi';
+import PublicAssetClaimLink from '../components/PublicAssetClaimLink';
 
 function StarRating({ value = 0, size = 'md' }) {
   return (
@@ -181,14 +182,17 @@ export default function RoomDetail() {
 
   useEffect(() => {
     if (!roomId) return;
+    let active = true;
     setRoomLoading(true);
+    setRoomError(null);
     propertyApi
       .getRoomDetail(Number(roomId))
-      .then((data) => setRoom(data))
-      .catch((err) =>
-        setRoomError(err?.message || '방 정보를 불러올 수 없습니다.')
-      )
-      .finally(() => setRoomLoading(false));
+      .then((data) => { if (active) setRoom(data); })
+      .catch((err) => {
+        if (active) setRoomError(err?.message || '방 정보를 불러올 수 없습니다.');
+      })
+      .finally(() => { if (active) setRoomLoading(false); });
+    return () => { active = false; };
   }, [roomId]);
 
   useEffect(() => {
@@ -535,6 +539,9 @@ export default function RoomDetail() {
                 </>
               );
             })()}
+            {room.roomId === Number(roomId) && (
+              <PublicAssetClaimLink resourceType="ROOM" resourceId={room.roomId} />
+            )}
           </div>
         </div>
 

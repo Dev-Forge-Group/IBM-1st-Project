@@ -8,6 +8,7 @@ import styles from './BuildingDetail.module.css';
 import { toApiImageUrl } from '../../../shared/utils/imageUrl';
 import ImageGallery from '../../file/components/ImageGallery';
 import { KAKAO_MAP_KEY, KMA_KEY } from '../../chat/config/chatConfig';
+import PublicAssetClaimLink from '../components/PublicAssetClaimLink';
 
 // ── 카카오맵 동적 로드 ────────────────────────────────────────
 let _kakaoLoadPromise = null;
@@ -384,14 +385,17 @@ export default function BuildingDetail() {
 
   useEffect(() => {
     if (!buildingId) return;
+    let active = true;
     setLoading(true);
+    setError(null);
     propertyApi
       .getBuildingDetail(Number(buildingId))
-      .then((data) => setBuilding(data))
-      .catch((err) =>
-        setError(err?.message || '빌딩 정보를 불러올 수 없습니다.')
-      )
-      .finally(() => setLoading(false));
+      .then((data) => { if (active) setBuilding(data); })
+      .catch((err) => {
+        if (active) setError(err?.message || '빌딩 정보를 불러올 수 없습니다.');
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [buildingId]);
 
   useEffect(() => {
@@ -615,6 +619,9 @@ export default function BuildingDetail() {
                 🛋️ 공용공간 보기
               </button>
             </div>
+            {building.buildingId === Number(buildingId) && (
+              <PublicAssetClaimLink resourceType="BUILDING" resourceId={building.buildingId} />
+            )}
           </div>
         </div>
 
