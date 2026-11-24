@@ -90,13 +90,14 @@ describe('owner qualification, asset verification and staff review workflows', (
   });
 
   it('requires review grounds before staff approval and reloads the pending application queue', async () => {
-    api.getApplications.mockResolvedValue([{ userId: 'member-one', userNm: 'Synthetic member', status: 'PENDING', applicationNote: 'Synthetic qualification' }]);
+    const updatedAt = '2026-11-25T00:00:01.123456';
+    api.getApplications.mockResolvedValue([{ userId: 'member-one', userNm: 'Synthetic member', status: 'PENDING', applicationNote: 'Synthetic qualification', updatedAt }]);
     api.reviewApplication.mockResolvedValue({ status: 'APPROVED' }); view(OwnerApprovalManagement);
     fireEvent.click(await screen.findByRole('button', { name: '확인·승인' })); expect(api.reviewApplication).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent('확인 근거와 처리 의견');
     fireEvent.change(screen.getByLabelText('처리 의견 member-one'), { target: { value: 'Synthetic verified identity' } });
     fireEvent.click(screen.getByRole('button', { name: '확인·승인' }));
-    await waitFor(() => expect(api.reviewApplication).toHaveBeenCalledWith('member-one', true, 'Synthetic verified identity'));
+    await waitFor(() => expect(api.reviewApplication).toHaveBeenCalledWith('member-one', true, 'Synthetic verified identity', updatedAt));
     await waitFor(() => expect(api.getApplications).toHaveBeenCalledTimes(2));
   });
 
@@ -117,5 +118,28 @@ describe('owner qualification, asset verification and staff review workflows', (
     fireEvent.click(screen.getByRole('button', { name: '확인·승인' })); await screen.findByText('Synthetic review failure');
     fireEvent.click(screen.getByRole('button', { name: '확인·승인' }));
     await waitFor(() => expect(api.reviewAssetClaim).toHaveBeenCalledTimes(2));
+  });
+
+  it('requires staff to load revised evidence before either review decision can be sent', async () => {
+    const original = { ...claim, updatedAt: '2026-11-25T00:00:01.123456' };
+    const revised = { ...original, proofReference: 'Revised synthetic evidence', updatedAt: '2026-11-25T00:00:02.123456' };
+    const conflict = Object.assign(new Error('신청 내용이 변경되었습니다. 새로고침 후 다시 확인해주세요.'), { errorCode: 'OWNERSHIP_409', status: 409 });
+    api.getAllAssetClaims.mockResolvedValueOnce([original]).mockResolvedValue([revised]);
+    api.reviewAssetClaim.mockRejectedValueOnce(conflict).mockResolvedValue({ ...revised, status: 'ACTIVE' });
+    view(OwnerApprovalManagement);
+    fireEvent.click(screen.getByRole('button', { name: '자산 소유 관계', exact: true }));
+    const approval = await screen.findByRole('button', { name: '확인·승인' });
+    fireEvent.change(screen.getByLabelText('처리 의견 BUILDING-7'), { target: { value: 'Original synthetic review' } });
+    fireEvent.click(approval);
+    expect(await screen.findByRole('alert')).toHaveTextContent('새로고침 후 다시 확인');
+    expect(approval).toBeDisabled();
+    expect(screen.getByRole('button', { name: '반려' })).toBeDisabled();
+    expect(api.reviewAssetClaim).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+    await screen.findByText('Revised synthetic evidence');
+    fireEvent.change(screen.getByLabelText('처리 의견 BUILDING-7'), { target: { value: 'Revised synthetic review' } });
+    fireEvent.click(screen.getByRole('button', { name: '확인·승인' }));
+    await waitFor(() => expect(api.reviewAssetClaim).toHaveBeenLastCalledWith(revised, true, 'Revised synthetic review'));
   });
 });

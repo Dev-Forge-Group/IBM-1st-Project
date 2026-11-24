@@ -52,14 +52,14 @@ export const ownerApi = {
     method: 'POST', body: { resourceType: resourceType(type), resourceId: resourceId(id), proofReference },
   }),
   getApplications: (status = 'PENDING', signal) => request(`/admin/owner-applications${query({ status })}`, { signal }),
-  reviewApplication: (userId, approved, reviewNote) => request(
+  reviewApplication: (userId, approved, reviewNote, expectedUpdatedAt) => request(
     `/admin/owner-applications/${encodeURIComponent(userId)}/${approved ? 'approve' : 'reject'}`,
-    { method: 'POST', body: { reviewNote } }
+    { method: 'POST', body: { reviewNote, expectedUpdatedAt } }
   ),
   getAllAssetClaims: (status = 'PENDING', signal) => request(`/admin/asset-claims${query({ status })}`, { signal }),
   reviewAssetClaim: (claim, approved, reviewNote) => request(
     `/admin/asset-claims/${resourceType(claim.resourceType)}/${resourceId(claim.membershipId)}/${approved ? 'approve' : 'reject'}`,
-    { method: 'POST', body: { reviewNote } }
+    { method: 'POST', body: { reviewNote, expectedUpdatedAt: claim.updatedAt } }
   ),
   getBuildings: (params = {}) => request(`${collection('buildings')}${query(params)}`),
   getBuildingDetail: (id) => request(collection('buildings', id)),

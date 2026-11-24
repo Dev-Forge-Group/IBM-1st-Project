@@ -46,14 +46,16 @@ CONTRACT·BUILDING·ROOM·SPACE 파일 URL은 `/files/{id}/view|download` proxy�
 | --- | --- |
 | 본인 소유주 신청 조회·제출 | `GET/POST /users/me/owner-application`, 제출 `{applicationNote}` |
 | 본인 자산 증빙 조회·제출 | `GET/POST /users/me/asset-claims`, 제출 `{resourceType, resourceId, proofReference}` |
-| STAFF 소유주 심사 | `GET /admin/owner-applications?status=...`, `POST /admin/owner-applications/{userId}/approve|reject`, `{reviewNote}` |
-| STAFF 자산 심사 | `GET /admin/asset-claims?status=...`, `POST /admin/asset-claims/{BUILDING\|ROOM}/{membershipId}/approve|reject`, `{reviewNote}` |
+| STAFF 소유주 심사 | `GET /admin/owner-applications?status=...`, `POST /admin/owner-applications/{userId}/approve|reject`, `{reviewNote, expectedUpdatedAt?}` |
+| STAFF 자산 심사 | `GET /admin/asset-claims?status=...`, `POST /admin/asset-claims/{BUILDING\|ROOM}/{membershipId}/approve|reject`, `{reviewNote, expectedUpdatedAt?}` |
 | STAFF 계정 관리 | `/admin/users/**` |
 | OWNER 자산 업무 | `/owner/buildings`, `/owner/rooms`, `/owner/spaces`, `/owner/property-dashboard` |
 | OWNER 계약·입주자 업무 | `/owner/contracts`, `/owner/residents` |
 | OWNER 예약 업무 | `/owner/tour-reservations`, `/owner/space-reservations` |
 
 소비자용 기존 공개 탐색과 본인 계약·예약 API를 유지한다. 구 `/admin/buildings|rooms|spaces|contracts|residents|property-dashboard|tour-reservations|space-reservations` 업무 API는 닫고 OWNER API로 이동한다. OWNER 예약 화면과 알림 링크는 `/owner/reservations/tours`, `/owner/reservations/spaces`이며 API URL과 다르다.
+
+직원 심사 화면은 조회한 항목의 `updatedAt`을 `expectedUpdatedAt`으로 보낸다. 그사이 신청 내용이나 다른 직원의 심사 결과가 바뀌면 서버는 `409 OWNERSHIP_409`를 반환한다. 새로고침으로 최신 내용을 확인해야 다시 처리할 수 있다. 기존 API 호출은 `reviewNote`만으로도 처리할 수 있다.
 
 새 계약 알림은 `/owner/contracts?contractId=...`에서 해당 계약을 연다. 목록의 계약 번호 필터에도 계약 당사자 범위가 적용된다.
 

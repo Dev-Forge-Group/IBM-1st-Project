@@ -23,9 +23,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class OwnershipReviewService {
     private static final Set<String> PROFILE_STATES = Set.of("PENDING", "APPROVED", "REJECTED");
     private static final Set<String> CLAIM_STATES = Set.of("PENDING", "ACTIVE", "REJECTED", "REVOKED");
+    private static final String ADVANCE_UPDATED_AT =
+            "updated_at=GREATEST(CURRENT_TIMESTAMP(6), TIMESTAMPADD(MICROSECOND, 1, updated_at))";
     private static final String PROFILE_SELECT = """
             SELECT u.user_id,u.user_nm,u.user_email,COALESCE(p.status,'NONE') status,
-                   p.application_note,p.review_note,p.reviewed_by,p.created_at,p.reviewed_at
+                   p.application_note,p.review_note,p.reviewed_by,p.created_at,p.reviewed_at,p.updated_at
             FROM users u LEFT JOIN owner_profiles p ON p.user_id=u.user_id
             """;
 
@@ -46,8 +48,8 @@ public class OwnershipReviewService {
         } else if (!"APPROVED".equals(states.get(0))) {
             jdbc.update("""
                     UPDATE owner_profiles SET status='PENDING',application_note=?,review_note=NULL,
-                           reviewed_by=NULL,reviewed_at=NULL WHERE user_id=?
-                    """, note, userId);
+                           reviewed_by=NULL,reviewed_at=NULL,%s WHERE user_id=?
+                    """.formatted(ADVANCE_UPDATED_AT), note, userId);
         }
         // An already approved owner cannot accidentally revoke their own grant by submitting again.
         return application(userId);
@@ -62,17 +64,20 @@ public class OwnershipReviewService {
     }
 
     @Transactional
-    public OwnerApplicationResponse reviewApplication(String userId, boolean approved, String reviewNote) {
+    public OwnerApplicationResponse reviewApplication(String userId, boolean approved, String reviewNote,
+            LocalDateTime expectedUpdatedAt) {
         String reviewer = lockStaff();
         String note = text(reviewNote, 2000);
         requireTargetMember(userId, approved);
-        List<String> profile = jdbc.queryForList("SELECT status FROM owner_profiles WHERE user_id=? FOR UPDATE", String.class, userId);
+        List<LocalDateTime> profile = jdbc.query("SELECT updated_at FROM owner_profiles WHERE user_id=? FOR UPDATE",
+                (rs, row) -> rs.getObject("updated_at", LocalDateTime.class), userId);
         if (profile.isEmpty()) badRequest();
+        requireCurrentReview(expectedUpdatedAt, profile.get(0));
         String state = approved ? "APPROVED" : "REJECTED";
         jdbc.update("""
-                UPDATE owner_profiles SET status=?,review_note=?,reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP(6)
+                UPDATE owner_profiles SET status=?,review_note=?,reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP(6),%s
                 WHERE user_id=?
-                """, state, note, reviewer, userId);
+                """.formatted(ADVANCE_UPDATED_AT), state, note, reviewer, userId);
         jdbc.update("""
                 INSERT INTO account_role_grants(user_id,role_code,grant_state,granted_by,grant_reason)
                 VALUES(?,'OWNER',?,?,?)
@@ -111,20 +116,22 @@ public class OwnershipReviewService {
         } else if (!"ACTIVE".equals(existing.get(0).state())) {
             // Preserve CREATED so proof submission cannot publish an unreviewed new draft as legacy data.
             jdbc.update("UPDATE " + resource.memberships + " SET state='PENDING',proof_reference=?,review_note=NULL,"
-                    + "reviewed_by=NULL,reviewed_at=NULL WHERE membership_id=?", proof, existing.get(0).id());
+                    + "reviewed_by=NULL,reviewed_at=NULL," + ADVANCE_UPDATED_AT + " WHERE membership_id=?",
+                    proof, existing.get(0).id());
         }
         return claimResponse(resource, membershipByAsset(resource, userId, resourceId).get(0).id());
     }
 
     @Transactional
-    public AssetClaimResponse reviewClaim(String resourceType, Integer membershipId, boolean approved, String reviewNote) {
+    public AssetClaimResponse reviewClaim(String resourceType, Integer membershipId, boolean approved, String reviewNote,
+            LocalDateTime expectedUpdatedAt) {
         String reviewer = lockStaff();
         Resource resource = resource(resourceType);
         positive(membershipId);
         String note = text(reviewNote, 2000);
         // Read only the key first; all decisions use the subsequently locked membership.
         List<Membership> keys = jdbc.query("SELECT membership_id,user_id," + resource.idColumn
-                        + ",state,proof_reference FROM " + resource.memberships + " WHERE membership_id=?",
+                        + ",state,proof_reference,updated_at FROM " + resource.memberships + " WHERE membership_id=?",
                 (rs, row) -> membershipRow(rs), membershipId);
         if (keys.isEmpty()) badRequest();
         Membership key = keys.get(0);
@@ -132,8 +139,9 @@ public class OwnershipReviewService {
         if (approved) lockOwnerEligibility(key.userId());
         lockLiveAsset(resource, key.resourceId());
         Membership membership = jdbc.query("SELECT membership_id,user_id," + resource.idColumn
-                        + ",state,proof_reference FROM " + resource.memberships + " WHERE membership_id=? FOR UPDATE",
+                        + ",state,proof_reference,updated_at FROM " + resource.memberships + " WHERE membership_id=? FOR UPDATE",
                 (rs, row) -> membershipRow(rs), membershipId).get(0);
+        requireCurrentReview(expectedUpdatedAt, membership.updatedAt());
         if (approved) {
             text(membership.proof(), 1000);
             // No implicit transfer or joint-title operation is hidden in a simple approve endpoint.
@@ -144,7 +152,8 @@ public class OwnershipReviewService {
         }
         String state = approved ? "ACTIVE" : "ACTIVE".equals(membership.state()) ? "REVOKED" : "REJECTED";
         jdbc.update("UPDATE " + resource.memberships
-                + " SET state=?,review_note=?,reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP(6) WHERE membership_id=?",
+                + " SET state=?,review_note=?,reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP(6),"
+                + ADVANCE_UPDATED_AT + " WHERE membership_id=?",
                 state, note, reviewer, membershipId);
         audit(reviewer, membership.userId(), resource.name(), membership.resourceId(), state, note);
         return claimResponse(resource, membershipId);
@@ -176,14 +185,14 @@ public class OwnershipReviewService {
     private static String claimSelect(Resource resource) {
         String name = resource == Resource.BUILDING ? "a.building_nm" : "CONCAT(b.building_nm,' ',a.room_no,'호')";
         return "SELECT m.membership_id,m." + resource.idColumn + " resource_id," + name
-                + " resource_name,m.user_id,u.user_nm,m.state,m.origin,m.proof_reference,m.review_note,m.reviewed_by,m.created_at,m.reviewed_at"
+                + " resource_name,m.user_id,u.user_nm,m.state,m.origin,m.proof_reference,m.review_note,m.reviewed_by,m.created_at,m.reviewed_at,m.updated_at"
                 + " FROM " + resource.memberships + " m JOIN users u ON u.user_id=m.user_id JOIN "
                 + resource.table + " a ON a." + resource.idColumn + "=m." + resource.idColumn
                 + (resource == Resource.ROOM ? " JOIN building b ON b.building_id=a.building_id" : "");
     }
 
     private List<Membership> membershipByAsset(Resource resource, String userId, Integer resourceId) {
-        return jdbc.query("SELECT membership_id,user_id," + resource.idColumn + ",state,proof_reference FROM "
+        return jdbc.query("SELECT membership_id,user_id," + resource.idColumn + ",state,proof_reference,updated_at FROM "
                         + resource.memberships + " WHERE user_id=? AND " + resource.idColumn + "=? FOR UPDATE",
                 (rs, row) -> membershipRow(rs), userId, resourceId);
     }
@@ -243,23 +252,30 @@ public class OwnershipReviewService {
     private static OwnerApplicationResponse applicationRow(ResultSet rs, int row) throws SQLException {
         return new OwnerApplicationResponse(rs.getString("user_id"), rs.getString("user_nm"), rs.getString("user_email"),
                 rs.getString("status"), rs.getString("application_note"), rs.getString("review_note"), rs.getString("reviewed_by"),
-                time(rs, "created_at"), time(rs, "reviewed_at"));
+                time(rs, "created_at"), time(rs, "reviewed_at"), rs.getObject("updated_at", LocalDateTime.class));
     }
 
     private static AssetClaimResponse claimRow(ResultSet rs, Resource resource) throws SQLException {
         return new AssetClaimResponse(rs.getInt("membership_id"), resource.name(), rs.getInt("resource_id"),
                 rs.getString("resource_name"), rs.getString("user_id"), rs.getString("user_nm"), rs.getString("state"),
                 rs.getString("origin"), rs.getString("proof_reference"), rs.getString("review_note"), rs.getString("reviewed_by"),
-                time(rs, "created_at"), time(rs, "reviewed_at"));
+                time(rs, "created_at"), time(rs, "reviewed_at"), rs.getObject("updated_at", LocalDateTime.class));
     }
 
     private static Membership membershipRow(ResultSet rs) throws SQLException {
-        return new Membership(rs.getInt(1), rs.getString(2), rs.getInt(3), rs.getString(4), rs.getString(5));
+        return new Membership(rs.getInt(1), rs.getString(2), rs.getInt(3), rs.getString(4), rs.getString(5),
+                rs.getObject("updated_at", LocalDateTime.class));
     }
 
     private static LocalDateTime time(ResultSet rs, String column) throws SQLException {
         var timestamp = rs.getTimestamp(column);
         return timestamp == null ? null : timestamp.toLocalDateTime();
+    }
+
+    private static void requireCurrentReview(LocalDateTime expectedUpdatedAt, LocalDateTime currentUpdatedAt) {
+        if (expectedUpdatedAt != null && !expectedUpdatedAt.equals(currentUpdatedAt)) {
+            throw new BusinessException(ErrorCode.OWNERSHIP_REVIEW_CHANGED);
+        }
     }
 
     private static Resource resource(String value) {
@@ -285,7 +301,7 @@ public class OwnershipReviewService {
     private static void positive(Integer id) { if (id == null || id <= 0) badRequest(); }
     private static void badRequest() { throw new BusinessException(ErrorCode.BAD_REQUEST); }
     private static void forbidden() { throw new BusinessException(ErrorCode.FORBIDDEN); }
-    private record Membership(Integer id, String userId, Integer resourceId, String state, String proof) {}
+    private record Membership(Integer id, String userId, Integer resourceId, String state, String proof, LocalDateTime updatedAt) {}
 
     private enum Resource {
         BUILDING("building", "building_memberships", "building_id", ErrorCode.BUILDING_NOT_FOUND),

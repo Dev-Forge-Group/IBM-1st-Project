@@ -48,11 +48,13 @@ describe('owner workspace transport', () => {
     await ownerApi.getApplications('PENDING', controller.signal);
     expect(transport.mock.lastCall[0]).toBe('/admin/owner-applications?status=PENDING');
     expect(transport.mock.lastCall[1].signal).toBe(controller.signal);
-    await ownerApi.reviewAssetClaim({ resourceType: 'BUILDING', membershipId: 7 }, false, 'synthetic rejection');
+    const updatedAt = '2026-11-25T00:00:01.123456';
+    await ownerApi.reviewAssetClaim({ resourceType: 'BUILDING', membershipId: 7, updatedAt }, false, 'synthetic rejection');
     expect(transport.mock.lastCall[0]).toBe('/admin/asset-claims/BUILDING/7/reject');
-    expect(JSON.parse(transport.mock.lastCall[1].body)).toEqual({ reviewNote: 'synthetic rejection' });
-    await ownerApi.reviewApplication('member/one', true, 'synthetic approval');
+    expect(JSON.parse(transport.mock.lastCall[1].body)).toEqual({ reviewNote: 'synthetic rejection', expectedUpdatedAt: updatedAt });
+    await ownerApi.reviewApplication('member/one', true, 'synthetic approval', updatedAt);
     expect(transport.mock.lastCall[0]).toBe('/admin/owner-applications/member%2Fone/approve');
+    expect(JSON.parse(transport.mock.lastCall[1].body)).toEqual({ reviewNote: 'synthetic approval', expectedUpdatedAt: updatedAt });
   });
 
   it.each([0, -1, 1.5, 'bad', Number.MAX_SAFE_INTEGER + 1])('rejects unsafe resource ID %s without making a request', (id) => {

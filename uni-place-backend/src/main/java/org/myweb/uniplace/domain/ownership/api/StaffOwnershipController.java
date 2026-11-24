@@ -30,13 +30,13 @@ public class StaffOwnershipController {
     @PostMapping("/owner-applications/{userId}/approve")
     public ApiResponse<OwnerApplicationResponse> approveApplication(@PathVariable String userId,
             @Valid @RequestBody OwnershipRequests.Review request) {
-        return ApiResponse.ok(reviews.reviewApplication(userId, true, request.reviewNote()));
+        return ApiResponse.ok(reviews.reviewApplication(userId, true, request.reviewNote(), request.expectedUpdatedAt()));
     }
 
     @PostMapping("/owner-applications/{userId}/reject")
     public ApiResponse<OwnerApplicationResponse> rejectApplication(@PathVariable String userId,
             @Valid @RequestBody OwnershipRequests.Review request) {
-        return ApiResponse.ok(reviews.reviewApplication(userId, false, request.reviewNote()));
+        return ApiResponse.ok(reviews.reviewApplication(userId, false, request.reviewNote(), request.expectedUpdatedAt()));
     }
 
     @GetMapping("/asset-claims")
@@ -47,12 +47,12 @@ public class StaffOwnershipController {
     @PostMapping("/asset-claims/{resourceType}/{membershipId}/approve")
     public ApiResponse<AssetClaimResponse> approveClaim(@PathVariable String resourceType,
             @PathVariable Integer membershipId, @Valid @RequestBody OwnershipRequests.Review request) {
-        return ApiResponse.ok(reviews.reviewClaim(resourceType, membershipId, true, request.reviewNote()));
+        return ApiResponse.ok(reviews.reviewClaim(resourceType, membershipId, true, request.reviewNote(), request.expectedUpdatedAt()));
     }
 
     @PostMapping("/asset-claims/{resourceType}/{membershipId}/reject")
     public ApiResponse<AssetClaimResponse> rejectClaim(@PathVariable String resourceType,
             @PathVariable Integer membershipId, @Valid @RequestBody OwnershipRequests.Review request) {
-        return ApiResponse.ok(reviews.reviewClaim(resourceType, membershipId, false, request.reviewNote()));
+        return ApiResponse.ok(reviews.reviewClaim(resourceType, membershipId, false, request.reviewNote(), request.expectedUpdatedAt()));
     }
 }

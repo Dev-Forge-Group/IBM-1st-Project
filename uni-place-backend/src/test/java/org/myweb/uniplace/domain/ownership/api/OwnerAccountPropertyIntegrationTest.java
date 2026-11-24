@@ -190,6 +190,31 @@ class OwnerAccountPropertyIntegrationTest {
     }
 
     @Test
+    void staleOwnerReviewCannotApproveNewEvidenceOrRevokeACompletedReview() throws Exception {
+        String applicant = token(f.applicant());
+        String applicationPath = "/users/me/owner-application";
+        String reviewPath = "/admin/owner-applications/" + f.applicant();
+        data(call("POST", applicationPath, applicant, Map.of("applicationNote", "Original synthetic application")));
+        JsonNode stale = only(findBy(data(call("GET", "/admin/owner-applications?status=PENDING", staffToken(), null)),
+                "userId", f.applicant()));
+        JsonNode current = data(call("POST", applicationPath, applicant, Map.of("applicationNote", "Updated synthetic application")));
+        assertThat(current.path("updatedAt").asText()).isNotBlank().isNotEqualTo(stale.path("updatedAt").asText());
+        State pending = state();
+        assertReviewConflict(call("POST", reviewPath + "/approve", staffToken(),
+                Map.of("reviewNote", "Reviewed original application", "expectedUpdatedAt", stale.path("updatedAt"))));
+        assertThat(state()).isEqualTo(pending);
+        assertThat(roleNames(me(applicant))).doesNotContain("OWNER");
+        JsonNode approved = data(call("POST", reviewPath + "/approve", staffToken(),
+                Map.of("reviewNote", "Reviewed updated application", "expectedUpdatedAt", current.path("updatedAt"))));
+        assertThat(approved.path("status").asText()).isEqualTo("APPROVED");
+        State afterApproval = state();
+        assertReviewConflict(call("POST", reviewPath + "/reject", staffToken(),
+                Map.of("reviewNote", "Stale opposite decision", "expectedUpdatedAt", current.path("updatedAt"))));
+        assertThat(state()).isEqualTo(afterApproval);
+        assertThat(roleNames(me(applicant))).contains("OWNER");
+    }
+
+    @Test
     void staffCannotBecomeAnOwnerOrInheritCustomerBusinessPrivileges() throws Exception {
         JsonNode staff = me(staffToken());
         assertThat(staff.path("accountKind").asText()).isEqualTo("STAFF");
@@ -375,6 +400,42 @@ class OwnerAccountPropertyIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT state FROM building_memberships WHERE membership_id=?",
                 String.class, membership)).isEqualTo("PENDING");
         assertStatus(call("GET", "/buildings/" + id, null, null), 404);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"BUILDING", "ROOM"})
+    void staleAssetReviewLeavesTheCurrentProofAndDecisionUntouched(String type) throws Exception {
+        int id = new TransactionTemplate(transactions).execute(status -> {
+            Building asset = building(buildings, "Synthetic legacy asset");
+            return "BUILDING".equals(type) ? asset.getBuildingId() : room(rooms, asset, 903).getRoomId();
+        });
+        String owner = token(f.owner());
+        String path = "/users/me/asset-claims";
+        JsonNode claim = data(call("POST", path, owner,
+                Map.of("resourceType", type, "resourceId", id, "proofReference", "Original synthetic evidence")));
+        int membership = positiveId(claim, "membershipId");
+        String reviewPath = "/admin/asset-claims/" + type + "/" + membership;
+        String ownerPath = ("BUILDING".equals(type) ? "/owner/buildings/" : "/owner/rooms/") + id;
+        JsonNode stale = findBy(data(call("GET", "/admin/asset-claims?status=PENDING", staffToken(), null)),
+                "membershipId", membership).stream().filter(row -> type.equals(row.path("resourceType").asText())).findFirst().orElseThrow();
+        JsonNode current = data(call("POST", path, owner,
+                Map.of("resourceType", type, "resourceId", id, "proofReference", "Updated synthetic evidence")));
+        assertThat(current.path("updatedAt").asText()).isNotBlank().isNotEqualTo(stale.path("updatedAt").asText());
+        State pending = state();
+        assertReviewConflict(call("POST", reviewPath + "/approve", staffToken(),
+                Map.of("reviewNote", "Reviewed original proof", "expectedUpdatedAt", stale.path("updatedAt"))));
+        assertThat(state()).isEqualTo(pending);
+        assertStatus(call("GET", ownerPath, owner, null), 403);
+
+        JsonNode approved = data(call("POST", reviewPath + "/approve", staffToken(),
+                Map.of("reviewNote", "Reviewed updated proof", "expectedUpdatedAt", current.path("updatedAt"))));
+        assertThat(approved.path("status").asText()).isEqualTo("ACTIVE");
+        assertThat(approved.path("proofReference").asText()).isEqualTo("Updated synthetic evidence");
+        State afterApproval = state();
+        assertReviewConflict(call("POST", reviewPath + "/reject", staffToken(),
+                Map.of("reviewNote", "Stale opposite decision", "expectedUpdatedAt", current.path("updatedAt"))));
+        assertThat(state()).isEqualTo(afterApproval);
+        assertStatus(call("GET", ownerPath, owner, null), 200);
     }
 
     @Test
@@ -933,6 +994,11 @@ class OwnerAccountPropertyIntegrationTest {
     private static void assertStatus(Reply response, int expected) {
         assertThat(response.status()).as("HTTP status; response=%s", new String(response.body(), StandardCharsets.UTF_8))
                 .isEqualTo(expected);
+    }
+
+    private void assertReviewConflict(Reply response) throws IOException {
+        assertStatus(response, 409);
+        assertThat(json.readTree(response.body()).path("errorCode").asText()).isEqualTo("OWNERSHIP_409");
     }
     private static int positiveId(JsonNode node, String key) { int id = node.path(key).asInt(); assertThat(id).isPositive(); return id; }
     private static JsonNode only(List<JsonNode> values) { assertThat(values).hasSize(1); return values.get(0); }

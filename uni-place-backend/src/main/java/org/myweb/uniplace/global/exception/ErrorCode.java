@@ -29,6 +29,7 @@ public enum ErrorCode {
     EMAIL_NOT_VERIFIED(HttpStatus.BAD_REQUEST, "USER_400_4", "이메일 인증을 완료해주세요."),
     EMAIL_CODE_INVALID(HttpStatus.BAD_REQUEST, "USER_400_5", "인증코드가 올바르지 않거나 만료되었습니다."),
     EMAIL_CODE_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "USER_429_1", "잠시 후 다시 시도해주세요. (60초 후 재발송 가능)"),
+    OWNERSHIP_REVIEW_CHANGED(HttpStatus.CONFLICT, "OWNERSHIP_409", "신청 내용이나 심사 상태가 변경되었습니다. 새로고침 후 다시 확인해주세요."),
 
     // ===== Common =====
     BAD_REQUEST(HttpStatus.BAD_REQUEST, "COMMON_400", "잘못된 요청입니다."),

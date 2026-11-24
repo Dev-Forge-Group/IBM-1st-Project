@@ -5,16 +5,17 @@ import styles from '../components/OwnerWorkspace.module.css';
 function ReviewCard({ item, asset, onReviewed }) {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
+  const requiresRefresh = error?.errorCode === 'OWNERSHIP_409';
   async function review(approved) {
-    if (saving) return;
-    if (!note.trim()) { setError('확인 근거와 처리 의견을 입력해주세요.'); return; }
-    setSaving(true); setError('');
+    if (saving || requiresRefresh) return;
+    if (!note.trim()) { setError(new Error('확인 근거와 처리 의견을 입력해주세요.')); return; }
+    setSaving(true); setError(null);
     try {
       if (asset) await ownerApi.reviewAssetClaim(item, approved, note.trim());
-      else await ownerApi.reviewApplication(item.userId, approved, note.trim());
+      else await ownerApi.reviewApplication(item.userId, approved, note.trim(), item.updatedAt);
       onReviewed();
-    } catch (cause) { setError(cause.message); }
+    } catch (cause) { setError(cause); }
     finally { setSaving(false); }
   }
   return <article className={styles.card}>
@@ -23,11 +24,11 @@ function ReviewCard({ item, asset, onReviewed }) {
     <p>상태: {item.status}</p>
     <p>{asset ? item.proofReference || '확인 참고 정보가 없습니다.' : item.applicationNote}</p>
     {item.reviewNote && <p>이전 처리 의견: {item.reviewNote}</p>}
-    <label>처리 의견<textarea aria-label={`처리 의견 ${asset ? `${item.resourceType}-${item.membershipId}` : item.userId}`} maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} disabled={saving} /></label>
-    {error && <p role="alert" className={styles.error}>{error}</p>}
+    <label>처리 의견<textarea aria-label={`처리 의견 ${asset ? `${item.resourceType}-${item.membershipId}` : item.userId}`} maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} disabled={saving || requiresRefresh} /></label>
+    {error && <p role="alert" className={styles.error}>{error.message}</p>}
     <div className={styles.actions}>
-      <button className={styles.button} type="button" onClick={() => review(true)} disabled={saving || (asset && !item.proofReference)}>{saving ? '처리 중…' : '확인·승인'}</button>
-      <button className={styles.button} type="button" onClick={() => review(false)} disabled={saving}>{item.status === 'ACTIVE' || item.status === 'APPROVED' ? '권한 회수' : '반려'}</button>
+      <button className={styles.button} type="button" onClick={() => review(true)} disabled={saving || requiresRefresh || (asset && !item.proofReference)}>{saving ? '처리 중…' : '확인·승인'}</button>
+      <button className={styles.button} type="button" onClick={() => review(false)} disabled={saving || requiresRefresh}>{item.status === 'ACTIVE' || item.status === 'APPROVED' ? '권한 회수' : '반려'}</button>
     </div>
   </article>;
 }
