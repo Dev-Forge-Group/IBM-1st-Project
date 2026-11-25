@@ -38,6 +38,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.myweb.uniplace.global.slack.SlackNotificationService;
 
 import lombok.RequiredArgsConstructor;
@@ -119,22 +121,6 @@ public class ContractServiceImpl implements ContractService {
             safeNotifyOwner(ownerId, saved.getContractId(),
                     "계약 신청이 접수되었습니다. roomId=" + room.getRoomId());
         }
-        
-        slackNotificationService.send(String.format("""
-        	    📋 *새 계약 신청이 접수되었습니다!*
-        	    • 계약 ID : #%d
-        	    • 사용자  : %s
-        	    • 건물    : %s
-        	    • 객실    : %s호 (ID: %d)
-		    • 소유주 페이지 : /owner/contracts
-        	    """,
-        	    saved.getContractId(),
-        	    userId,
-        	    room.getBuilding().getBuildingNm(),
-        	    room.getRoomNo(),
-        	    room.getRoomId()
-        	));
-
         if (request.getSignFile() != null && !request.getSignFile().isEmpty()) {
             FileUploadResponse uploadResp = fileService.uploadFiles(
                 FileUploadRequest.builder()
@@ -166,7 +152,30 @@ public class ContractServiceImpl implements ContractService {
             }
         }
 
+        notifySlackAfterCommit(saved.getContractId(), userId, room);
         return ContractResponse.fromEntity(saved);
+    }
+
+    private void notifySlackAfterCommit(Integer contractId, String userId, Room room) {
+        String message = """
+                📋 *새 계약 신청이 접수되었습니다!*
+                • 계약 ID : #%d
+                • 사용자  : %s
+                • 건물    : %s
+                • 객실    : %s호 (ID: %d)
+                • 소유주 페이지 : /owner/contracts
+                """.formatted(contractId, userId, room.getBuilding().getBuildingNm(), room.getRoomNo(), room.getRoomId());
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    slackNotificationService.send(message);
+                } catch (RuntimeException failure) {
+                    log.warn("Contract Slack alert failed after commit. contractId={}, type={}", contractId,
+                            failure.getClass().getSimpleName());
+                }
+            }
+        });
     }
 
     @Override

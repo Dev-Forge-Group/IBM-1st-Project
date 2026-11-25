@@ -6,9 +6,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -310,6 +312,46 @@ class ContractCreateValidationIntegrationTest {
         assertNoEffects(before);
         JsonNode result = data(post(form("31", SIGNATURE_PNG, "synthetic-signature.png"), ownerToken()));
         assertSuccessfulCreate(result, 31, before);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void contractSlackFollowsTheOutermostTransaction(boolean commit) {
+        Snapshot before = snapshot();
+        withOwner(() -> {
+            int contractId = new TransactionTemplate(transactions).execute(status -> {
+                int id = service.createContract(directRequest(15, signature())).getContractId();
+                verifyNoInteractions(slack);
+                if (!commit) status.setRollbackOnly();
+                return id;
+            });
+            if (commit) {
+                assertThat(contracts.existsById(contractId)).isTrue();
+                verify(slack, times(1)).send(contains("계약 ID : #" + contractId));
+                verifyNoMoreInteractions(slack);
+            } else {
+                assertThat(snapshot()).isEqualTo(before);
+                verifyNoInteractions(slack);
+            }
+        });
+    }
+
+    @Test
+    void signatureStorageFailureRollsBackTheContractWithoutSendingSlack() throws Exception {
+        Snapshot before = snapshot();
+        doThrow(new IOException("Synthetic storage failure")).when(storage)
+                .store(any(MultipartFile.class), anyString(), anyString());
+        assertError(post(form("15", SIGNATURE_PNG, "synthetic-signature.png"), ownerToken()), ErrorCode.INTERNAL_ERROR);
+        assertThat(snapshot()).isEqualTo(before);
+        verifyNoInteractions(images, slack);
+    }
+
+    @Test
+    void slackDeliveryFailureDoesNotFailACommittedApplication() throws Exception {
+        Snapshot before = snapshot();
+        doThrow(new IllegalStateException("Synthetic Slack delivery failure")).when(slack).send(anyString());
+        JsonNode result = data(post(form("15", SIGNATURE_PNG, "synthetic-signature.png"), ownerToken()));
+        assertSuccessfulCreate(result, 15, before);
     }
 
     private void assertSuccessfulCreate(JsonNode result, int day, Snapshot before) throws Exception {
