@@ -14,6 +14,7 @@ import TimeSlotButtons from '../components/TimeSlotButtons';
 import styles from './SpaceReservationCreate.module.css';
 import { toKoreanMessage } from '../../../app/http/errorMapper';
 import { formatBuildingDisplay } from '../../../shared/utils/branchLabel';
+import { todayInSeoul } from '../../../shared/utils/seoulDate';
 
 const EMPTY_ITEMS = [];
 
@@ -64,9 +65,8 @@ export default function SpaceReservationCreate({
   const [selectedBuilding, setSelectedBuilding] = useState(null);
   const buildingId = Number(selectedBuilding?.buildingId) || null;
 
-  const [date, setDate] = useState(
-    initDateFromAi ?? new Date().toISOString().slice(0, 10)
-  );
+  const today = todayInSeoul();
+  const [date, setDate] = useState(initDateFromAi ?? today);
   const [availability, setAvailability] = useState(null);
   const [submitError, setSubmitError] = useState('');
   const availabilityKey = buildingId && date ? JSON.stringify([buildingId, date]) : null;
@@ -271,7 +271,7 @@ export default function SpaceReservationCreate({
               className={styles.input}
               type="date"
               value={date}
-              min={new Date().toISOString().slice(0, 10)}
+              min={today}
               onChange={(e) => setDate(e.target.value)}
               disabled={!selectedBuilding}
             />

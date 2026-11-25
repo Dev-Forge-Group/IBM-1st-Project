@@ -62,7 +62,21 @@ describe('space booking availability', () => {
     }));
     reservations.createSpaceReservation.mockResolvedValue({ srId: 42 });
   });
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('loads the Seoul calendar date when no recommendation specifies a date', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-24T15:00:00Z'));
+    const { dateInput } = openForm({ initStartAt: null, initEndAt: null });
+    await waitFor(() => expect(reservations.reservableSpaces).toHaveBeenCalledWith(
+      expect.objectContaining({ buildingId: 1, date: '2026-11-25' }),
+    ));
+    expect(dateInput).toHaveValue('2026-11-25');
+    expect(dateInput).toHaveAttribute('min', '2026-11-25');
+  });
 
   it('clears a previous date slot while awaiting the new date and preserves the selected space', async () => {
     const next = deferred();

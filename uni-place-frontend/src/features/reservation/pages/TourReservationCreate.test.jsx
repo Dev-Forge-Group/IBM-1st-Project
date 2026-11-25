@@ -117,7 +117,22 @@ describe('tour creation keeps slots within the current building, room and date',
     reservations.createTourReservation.mockResolvedValue({ tourId: 42 });
   });
 
-  afterEach(() => { cleanup(); });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it.each([true, false])('starts on the Seoul calendar date at midnight (inline %s)', async (inlineMode) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-24T15:00:00Z'));
+    const { container } = renderBooking({ inlineMode, initialDate: null });
+    await waitFor(() => expect(reservations.reservableTourSlots).toHaveBeenCalledWith({
+      buildingId: 1, roomId: 11, date: '2026-11-25',
+    }));
+    const date = container.querySelector('input[type="date"]');
+    expect(date).toHaveValue('2026-11-25');
+    expect(date).toHaveAttribute('min', '2026-11-25');
+  });
 
   it.each([true, false])('explains an unavailable operator and resets the reason when a different room is selected (inline %s)', async (inlineMode) => {
     reservations.reservableRooms.mockResolvedValue({

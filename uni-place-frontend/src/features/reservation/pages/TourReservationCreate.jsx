@@ -12,6 +12,7 @@ import TimeSlotButtons from '../components/TimeSlotButtons';
 import styles from './TourReservationCreate.module.css';
 import { toKoreanMessage } from '../../../app/http/errorMapper';
 import { formatBuildingDisplay } from '../../../shared/utils/branchLabel';
+import { todayInSeoul } from '../../../shared/utils/seoulDate';
 import {
   validatePhone,
   validateTourPwd,
@@ -63,9 +64,8 @@ export default function TourReservationCreate({
     ? roomsPage.page?.content ?? EMPTY_ITEMS : EMPTY_ITEMS;
 
   // slot
-  const [date, setDate] = useState(
-    initDate ?? new Date().toISOString().slice(0, 10)
-  );
+  const today = todayInSeoul();
+  const [date, setDate] = useState(initDate ?? today);
   const [roomId, setRoomId] = useState(initRoomId);
   const [slotsResult, setSlotsResult] = useState(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -332,7 +332,7 @@ export default function TourReservationCreate({
                 className={styles.input}
                 type="date"
                 value={date}
-                min={new Date().toISOString().slice(0, 10)}
+                min={today}
                 onChange={(e) => setDate(e.target.value)}
                 disabled={!selectedBuilding}
               />
@@ -643,7 +643,7 @@ export default function TourReservationCreate({
                 className={styles.input}
                 type="date"
                 value={date}
-                min={new Date().toISOString().slice(0, 10)}
+                min={today}
                 onChange={(e) => setDate(e.target.value)}
                 disabled={!selectedBuilding}
               />
