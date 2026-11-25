@@ -1,6 +1,6 @@
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Link, MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ContractApply from './ContractApply';
 
@@ -23,6 +23,13 @@ const FILE_B = 'synthetic-signature-b.png';
 let readerCreated;
 let fileRead;
 
+const FIRST_ROOM = {
+  roomId: 7, roomNo: 101, buildingNm: 'Synthetic building', buildingAddr: 'Synthetic building address',
+  rentMin: 12, deposit: 1000000, rentPrice: 500000, manageFee: 50000,
+  floor: 1, roomSize: 20, roomCapacity: 1, sunDirection: 's',
+};
+const SECOND_ROOM = { ...FIRST_ROOM, roomId: 8, roomNo: 202, buildingNm: 'Synthetic second building' };
+
 const signature = (name = FILE_A) => new File(['Synthetic signature fixture'], name, { type: 'image/png' });
 const emptySignature = () => new File([], 'empty-signature.png', { type: 'image/png' });
 const previewFor = (file) => `data:image/png;base64,${btoa(`Synthetic signature: ${file.name}`)}`;
@@ -35,8 +42,17 @@ class FixtureFileReader {
   }
 }
 
+function openApplication() {
+  return render(
+    <MemoryRouter initialEntries={['/contracts/apply?roomId=7']}>
+      <Link to="/contracts/apply?roomId=8">다른 호실 신청</Link>
+      <ContractApply />
+    </MemoryRouter>,
+  );
+}
+
 async function readyForm(paymentDay = '15') {
-  const view = render(<MemoryRouter initialEntries={['/contracts/apply?roomId=7']}><ContractApply /></MemoryRouter>);
+  const view = openApplication();
   await screen.findByPlaceholderText('임차인 성명');
   fireEvent.change(view.container.querySelector('input[name="contractStart"]'), { target: { value: '2100-01-01' } });
   fireEvent.change(screen.getByPlaceholderText('매월 납부일 (1~31)'), { target: { value: paymentDay } });
@@ -66,16 +82,82 @@ describe('contract application requires a nonempty signature and preserves recov
     readerCreated = vi.fn();
     fileRead = vi.fn();
     vi.stubGlobal('FileReader', FixtureFileReader);
-    property.getRoomDetail.mockResolvedValue({
-      roomId: 7, roomNo: 101, buildingNm: 'Synthetic building', buildingAddr: 'Synthetic building address',
-      rentMin: 12, deposit: 1000000, rentPrice: 500000, manageFee: 50000,
-      floor: 1, roomSize: 20, roomCapacity: 1, sunDirection: 's',
-    });
+    property.getRoomDetail.mockImplementation((id) => Promise.resolve(id === 8 ? SECOND_ROOM : FIRST_ROOM));
     contracts.myContracts.mockResolvedValue([]);
     contracts.createContract.mockResolvedValue({ contractId: 11 });
   });
 
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it('uses the current room when a previous room request completes late', async () => {
+    let resolveEarlier;
+    property.getRoomDetail.mockImplementationOnce(() => new Promise((resolve) => { resolveEarlier = resolve; }));
+    openApplication();
+    fireEvent.click(screen.getByRole('link', { name: '다른 호실 신청' }));
+    await screen.findByRole('button', { name: 'Synthetic second building 202호' });
+    await act(async () => { resolveEarlier(FIRST_ROOM); });
+    expect(screen.getByRole('button', { name: 'Synthetic second building 202호' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Synthetic building 101호' })).not.toBeInTheDocument();
+  });
+
+  it('requires fresh applicant input, consent and a signature when changing rooms', async () => {
+    const { fileInput } = await readyForm();
+    choose(fileInput, signature());
+    expect(screen.getByAltText('서명 미리보기')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: '다른 호실 신청' }));
+    await screen.findByRole('button', { name: 'Synthetic second building 202호' });
+    expect(screen.getByPlaceholderText('임차인 성명')).toHaveValue('');
+    expect(screen.getByRole('checkbox', { name: '전체 동의', exact: true })).not.toBeChecked();
+    expect(screen.queryByAltText('서명 미리보기')).not.toBeInTheDocument();
+  });
+
+  it('shows the selected signature after out-of-order preview reads', async () => {
+    const finishing = new Map();
+    vi.stubGlobal('FileReader', class {
+      readAsDataURL(file) {
+        finishing.set(file, () => this.onload?.({ target: { result: previewFor(file) } }));
+      }
+    });
+    const { form, fileInput } = await readyForm();
+    const original = signature();
+    const current = signature(FILE_B);
+    choose(fileInput, original);
+    choose(fileInput, current);
+    await act(async () => { finishing.get(current)(); });
+    await act(async () => { finishing.get(original)(); });
+    expect(screen.getByAltText('서명 미리보기')).toHaveAttribute('src', previewFor(current));
+    fireEvent.submit(form);
+    await waitFor(() => expect(contracts.createContract).toHaveBeenCalledTimes(1));
+    expect(contracts.createContract.mock.lastCall[0].signFile).toBe(current);
+  });
+
+  it('waits for the preview and ignores it after the pending signature is removed', async () => {
+    let finish;
+    vi.stubGlobal('FileReader', class {
+      readAsDataURL(file) { finish = () => this.onload?.({ target: { result: previewFor(file) } }); }
+    });
+    const { form, fileInput } = await readyForm();
+    choose(fileInput, signature());
+    fireEvent.submit(form);
+    expect(contracts.createContract).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '✕ 제거', exact: true }));
+    await act(async () => { finish(); });
+    expect(screen.queryByAltText('서명 미리보기')).not.toBeInTheDocument();
+    fireEvent.submit(form);
+    expect(contracts.createContract).not.toHaveBeenCalled();
+  });
+
+  it('accepts one submission while the same form is waiting for its result', async () => {
+    let complete;
+    contracts.createContract.mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+    const { form, fileInput } = await readyForm();
+    choose(fileInput, signature());
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(contracts.createContract).toHaveBeenCalledTimes(1);
+    await act(async () => { complete({ contractId: 11 }); });
+    expect(screen.getByRole('heading', { name: '계약 신청이 완료되었습니다!' })).toBeInTheDocument();
+  });
 
   it('rejects an initially empty signature before creating a reader, showing a preview or submitting', async () => {
     const { form, fileInput } = await readyForm();

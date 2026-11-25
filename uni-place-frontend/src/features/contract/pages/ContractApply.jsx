@@ -28,10 +28,18 @@ const sunLabel = { s: '남향', n: '북향', e: '동향', w: '서향' };
 /* ═══════════════════════════════════════════════════════════ */
 export default function ContractApply() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-
   const roomId = Number(searchParams.get('roomId'));
+
+  return (
+    <ContractApplication key={`${roomId}:${user?.userId ?? ''}`}
+      roomId={roomId} user={user} authLoading={authLoading} />
+  );
+}
+
+function ContractApplication({ roomId, user, authLoading }) {
+  const navigate = useNavigate();
+  const applicantId = user?.userId;
 
   /* 방 데이터 */
   const [room, setRoom] = useState(null);
@@ -60,6 +68,7 @@ export default function ContractApply() {
   const [signFile, setSignFile] = useState(null);
   const [signPreview, setSignPreview] = useState(null);
   const signInputRef = useRef(null);
+  const signReaderRef = useRef(null);
 
   /* 약관 동의 */
   const [agreeContract, setAgreeContract] = useState(false);
@@ -71,6 +80,7 @@ export default function ContractApply() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
   const [submitOk, setSubmitOk] = useState(false);
+  const submitRef = useRef(false);
   const minContractEnd = form.contractStart
     ? addContractDays(form.contractStart, MIN_CONTRACT_DAYS)
     : '';
@@ -103,7 +113,7 @@ export default function ContractApply() {
 
   /* 내 계약 목록 → 같은 방의 active/approved/requested 기간 추출 */
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !applicantId || authLoading) return;
     contractApi
       .myContracts()
       .then((list) => {
@@ -119,7 +129,7 @@ export default function ContractApply() {
         setBlockedRanges(ranges);
       })
       .catch(() => {});
-  }, [roomId]);
+  }, [applicantId, authLoading, roomId]);
 
   /* 로그인 체크 */
   useEffect(() => {
@@ -170,12 +180,24 @@ export default function ContractApply() {
     }
     setSubmitError(null);
     setSignFile(file);
+    setSignPreview(null);
     const reader = new FileReader();
-    reader.onload = (ev) => setSignPreview(ev.target.result);
+    signReaderRef.current = reader;
+    reader.onload = (ev) => {
+      if (signReaderRef.current !== reader) return;
+      signReaderRef.current = null;
+      setSignPreview(ev.target.result);
+    };
+    reader.onerror = () => {
+      if (signReaderRef.current !== reader) return;
+      handleRemoveSign();
+      setSubmitError('서명 이미지를 불러올 수 없습니다. 다시 선택해주세요.');
+    };
     reader.readAsDataURL(file);
   };
 
   const handleRemoveSign = () => {
+    signReaderRef.current = null;
     setSignFile(null);
     setSignPreview(null);
     if (signInputRef.current) signInputRef.current.value = '';
@@ -183,6 +205,7 @@ export default function ContractApply() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!user || submitRef.current) return;
     const pd = Number(form.paymentDay);
     const today = todayInSeoul();
 
@@ -242,6 +265,10 @@ export default function ContractApply() {
       setSubmitError(signFile ? EMPTY_SIGNATURE_MESSAGE : '서명 이미지를 첨부해주세요.');
       return;
     }
+    if (!signPreview) {
+      setSubmitError('서명 미리보기를 불러온 뒤 신청해주세요.');
+      return;
+    }
 
     // 약관 동의
     if (!agreeContract || !agreePersonal) {
@@ -249,6 +276,7 @@ export default function ContractApply() {
       return;
     }
 
+    submitRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -271,6 +299,7 @@ export default function ContractApply() {
           '계약 신청 중 오류가 발생했습니다.'
       );
     } finally {
+      submitRef.current = false;
       setSubmitting(false);
     }
   };
@@ -759,13 +788,13 @@ export default function ContractApply() {
                     📎 서명 이미지 첨부
                   </span>
                 </label>
-                {signPreview ? (
+                {signFile ? (
                   <div className={styles.signPreviewWrap}>
-                    <img
-                      src={signPreview}
-                      alt="서명 미리보기"
-                      className={styles.signPreview}
-                    />
+                    {signPreview ? (
+                      <img src={signPreview} alt="서명 미리보기" className={styles.signPreview} />
+                    ) : (
+                      <p role="status">서명 미리보기를 불러오는 중…</p>
+                    )}
                     <button
                       type="button"
                       className={styles.signRemoveBtn}
@@ -852,7 +881,7 @@ export default function ContractApply() {
               <button
                 type="submit"
                 className={styles.submitBtn}
-                disabled={submitting || !agreeContract || !agreePersonal}
+                disabled={submitting || !agreeContract || !agreePersonal || (signFile && !signPreview)}
               >
                 {submitting ? '신청 중...' : '📝 계약 신청하기'}
               </button>
