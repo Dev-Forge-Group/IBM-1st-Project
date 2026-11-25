@@ -126,6 +126,7 @@ public enum ErrorCode {
     SPACE_RESERVATION_TIME_CONFLICT(HttpStatus.CONFLICT, "SPACE_RSV_409", "이미 예약된 시간대와 겹칩니다."),
     SPACE_RESERVATION_CONCURRENT_CHANGE(HttpStatus.CONFLICT, "SPACE_RSV_409_2", "예약 상태가 변경되었습니다. 새로고침 후 다시 시도해 주세요."),
     SPACE_RESERVATION_CANNOT_CANCEL(HttpStatus.BAD_REQUEST, "SPACE_RSV_400_4", "취소할 수 없는 예약 상태입니다."),
+    SPACE_RESERVATION_OWNER_UNVERIFIED(HttpStatus.BAD_REQUEST, "SPACE_RSV_400_5", "소유 관계 확인 후 공용공간을 예약할 수 있습니다."),
     SPACE_RESERVATION_ACCESS_DENIED(HttpStatus.FORBIDDEN, "SPACE_RSV_403", "해당 예약에 접근 권한이 없습니다."),
     SPACE_RESERVATION_TENANT_ONLY(HttpStatus.FORBIDDEN, "SPACE_RSV_403_1", "입주자만 공용공간을 예약할 수 있습니다."),
     SPACE_RESERVATION_USER_INACTIVE(HttpStatus.FORBIDDEN, "SPACE_RSV_403_2", "비활성 상태의 계정은 예약할 수 없습니다."),

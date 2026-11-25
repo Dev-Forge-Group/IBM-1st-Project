@@ -78,7 +78,7 @@ public class ContractFileAccessPolicy {
 
     private Integer spaceBuilding(Integer spaceId) {
         if (spaceId == null) throw new BusinessException(ErrorCode.FILE_NOT_FOUND);
-        var ids = jdbc.queryForList("SELECT building_id FROM common_space WHERE space_id=? AND delete_yn='N'",
+        var ids = jdbc.queryForList("SELECT building_id FROM common_space WHERE space_id=?",
                 Integer.class, spaceId);
         if (ids.isEmpty()) throw new BusinessException(ErrorCode.FILE_NOT_FOUND);
         return ids.get(0);

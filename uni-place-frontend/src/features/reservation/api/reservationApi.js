@@ -6,7 +6,7 @@ function getAccessToken() {
 
 async function request(
   path,
-  { method = 'GET', body, headers = {}, auth = false } = {}
+  { method = 'GET', body, headers = {}, auth = false, cache } = {}
 ) {
   const res = await fetchWithAuthRetry(
     path,
@@ -20,6 +20,7 @@ async function request(
         ...headers,
       },
       credentials: 'same-origin',
+      cache,
       body: body ? JSON.stringify(body) : undefined,
     },
     { auth }
@@ -73,7 +74,7 @@ export const reservationApi = {
   }) => {
     const q = buildQuery({ buildingId, date, page, size, sort, direct });
     // 주의: tenant(입주자) / 로그인한 사용자만 예약 가능하도록 서버에서 권한 검사 포함
-    return request(`/space-reservations/spaces${q}`, { auth: true });
+    return request(`/space-reservations/spaces${q}`, { auth: true, cache: 'no-store' });
   },
 
   createSpaceReservation: (body) =>
@@ -110,7 +111,7 @@ export const reservationApi = {
 
   reservableTourSlots: ({ buildingId, roomId, date }) => {
     const q = buildQuery({ buildingId, roomId, date });
-    return request(`/tour-reservations/slots${q}`);
+    return request(`/tour-reservations/slots${q}`, { cache: 'no-store' });
   },
 
   createTourReservation: (body) =>

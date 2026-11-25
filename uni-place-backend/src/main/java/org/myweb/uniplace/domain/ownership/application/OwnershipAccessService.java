@@ -304,12 +304,6 @@ public class OwnershipAccessService implements OwnershipAccess {
     }
 
     @Override
-    public void requireVerifiedRentalBuilding(Integer buildingId) {
-        requirePublicBuilding(buildingId);
-        if (eligibleOwnerIdsForBuilding(buildingId).isEmpty()) badRequest();
-    }
-
-    @Override
     @Transactional
     public void recordContractOwners(Integer contractId, Integer roomId) {
         String consumer = requireMember();

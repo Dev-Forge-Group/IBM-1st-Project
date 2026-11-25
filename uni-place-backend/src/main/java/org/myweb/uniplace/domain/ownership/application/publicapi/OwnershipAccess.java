@@ -34,7 +34,6 @@ public interface OwnershipAccess {
     Set<String> eligibleOwnerIdsForRoom(Integer roomId);
     Set<String> eligibleOwnerIdsForBuilding(Integer buildingId);
     void requireVerifiedRentalRoom(Integer roomId);
-    void requireVerifiedRentalBuilding(Integer buildingId);
     void recordContractOwners(Integer contractId, Integer roomId);
     Set<String> contractOwnerIds(Integer contractId);
 }

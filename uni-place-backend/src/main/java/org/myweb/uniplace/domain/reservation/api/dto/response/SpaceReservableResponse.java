@@ -16,8 +16,10 @@ public class SpaceReservableResponse {
     private Integer buildingId;
     private Integer spaceId;
     private String spaceNm;
+    private Integer spaceCapacity;
 
     private List<TimeSlotResponse> availableSlots;
+    private String unavailableReason;
 
     @Getter
     @NoArgsConstructor

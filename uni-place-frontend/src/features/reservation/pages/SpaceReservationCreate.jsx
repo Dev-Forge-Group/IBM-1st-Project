@@ -161,11 +161,11 @@ export default function SpaceReservationCreate({
   }, [availabilityKey, buildingId, date, initSpaceId]);
 
   const currentSpace = spaces.find((space) => String(space.spaceId) === spaceId);
-  const availableSlots = useMemo(
-    () => (currentSpace?.availableSlots ?? EMPTY_ITEMS).filter((slot) =>
-      slot.startAt?.slice(0, 10) === date && slot.endAt?.slice(0, 10) === date),
-    [currentSpace, date]
-  );
+  const availableSlots = useMemo(() => {
+    if (currentSpace?.unavailableReason) return EMPTY_ITEMS;
+    return (currentSpace?.availableSlots ?? EMPTY_ITEMS).filter((slot) =>
+      slot.startAt?.slice(0, 10) === date && slot.endAt?.slice(0, 10) === date);
+  }, [currentSpace, date]);
   const selectedSlot = availableSlots.includes(chosenSlot) ? chosenSlot : null;
 
   // Apply the recommendation only to its original booking context.
@@ -187,7 +187,10 @@ export default function SpaceReservationCreate({
   }, [availableSlots, buildingId, date, initBuildingId, initDateFromAi, initEndAt, initSpaceId,
     initStartAt, spaceId]);
 
-  const canSubmit = Boolean(currentSpace && selectedSlot && Number.isInteger(srNoPeople) && srNoPeople > 0);
+  const capacity = currentSpace?.spaceCapacity;
+  const exceedsCapacity = capacity != null && srNoPeople > capacity;
+  const canSubmit = Boolean(currentSpace && selectedSlot && Number.isInteger(srNoPeople)
+    && srNoPeople > 0 && !exceedsCapacity);
 
   const [submitLoading, setSubmitLoading] = useState(false);
   const submitRef = useRef(false);
@@ -196,13 +199,6 @@ export default function SpaceReservationCreate({
     if (!canSubmit || submitRef.current) return;
     submitRef.current = true;
     setSubmitLoading(true);
-    const maxCap = currentSpace?.spaceCapacity;
-    if (maxCap && Number(srNoPeople) > maxCap) {
-      setSubmitError(`예약 인원이 최대 수용 인원(${maxCap}명)을 초과합니다.`);
-      submitRef.current = false;
-      setSubmitLoading(false);
-      return;
-    }
     try {
       await reservationApi.createSpaceReservation({
         buildingId,
@@ -283,20 +279,23 @@ export default function SpaceReservationCreate({
           <div className={styles.formGroup}>
             <label className={styles.label}>
               이용 인원
-              {currentSpace?.spaceCapacity
-                ? ` (최대 ${currentSpace.spaceCapacity}명)`
-                : ''}
+              {capacity != null && ` (최대 ${capacity}명)`}
             </label>
             <input
               className={styles.input}
               type="number"
               min={1}
-              max={currentSpace?.spaceCapacity || 99}
+              max={capacity ?? undefined}
               value={srNoPeople}
               onChange={(e) => setSrNoPeople(Number(e.target.value))}
               disabled={!selectedBuilding}
               style={{ maxWidth: 100 }}
             />
+            {exceedsCapacity && (
+              <p className={styles.errMsg} role="status">
+                예약 인원이 최대 수용 인원({capacity}명)을 초과합니다.
+              </p>
+            )}
           </div>
         </div>
         {spacesLoading && <p className={styles.mutedMsg}>공용공간 조회 중…</p>}
@@ -339,11 +338,17 @@ export default function SpaceReservationCreate({
                 {initEndAt?.slice(11, 16)}
               </p>
             )}
-          <TimeSlotButtons
-            slots={availableSlots}
-            selectedKey={selectedSlot ? String(selectedSlot.startAt) : ''}
-            onSelect={setChosenSlot}
-          />
+          {currentSpace?.unavailableReason ? (
+            <p className={styles.mutedMsg} role="status">
+              {toKoreanMessage({ errorCode: currentSpace.unavailableReason })}
+            </p>
+          ) : (
+            <TimeSlotButtons
+              slots={availableSlots}
+              selectedKey={selectedSlot ? String(selectedSlot.startAt) : ''}
+              onSelect={setChosenSlot}
+            />
+          )}
         </div>
       </section>
 

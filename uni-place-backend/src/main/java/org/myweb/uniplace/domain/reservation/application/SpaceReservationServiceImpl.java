@@ -99,12 +99,23 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
                 .build();
 
         Page<SpaceResponse> spaces = spaceService.searchPage(request, pageable);
+        boolean verifiedOperator = !ownership.eligibleOwnerIdsForBuilding(buildingId).isEmpty();
 
         LocalDateTime dayStart = date.atStartOfDay();
         LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
 
         return spaces.map(s -> {
             Integer spaceId = s.getSpaceId();
+            var response = SpaceReservableResponse.builder()
+                    .buildingId(buildingId)
+                    .spaceId(spaceId)
+                    .spaceNm(s.getSpaceNm())
+                    .spaceCapacity(s.getSpaceCapacity());
+            if (!verifiedOperator) {
+                return response.availableSlots(List.of())
+                        .unavailableReason(ErrorCode.SPACE_RESERVATION_OWNER_UNVERIFIED.getCode())
+                        .build();
+            }
 
             List<SpaceReservationEntity> reserved = spaceReservationRepository.findActiveInDayRange(
                     spaceId,
@@ -128,12 +139,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
                                     && ts.getEndAt().isAfter(reservation.getSrStartAt())))
                     .toList();
 
-            return SpaceReservableResponse.builder()
-                    .buildingId(buildingId)
-                    .spaceId(spaceId)
-                    .spaceNm(s.getSpaceNm())
-                    .availableSlots(available)
-                    .build();
+            return response.availableSlots(available).build();
         });
     }
 
@@ -181,7 +187,9 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
             throw new BusinessException(ErrorCode.BUILDING_NOT_FOUND);
         }
         ownership.requirePublicBuilding(building.getBuildingId());
-        ownership.requireVerifiedRentalBuilding(building.getBuildingId());
+        if (ownership.eligibleOwnerIdsForBuilding(building.getBuildingId()).isEmpty()) {
+            throw new BusinessException(ErrorCode.SPACE_RESERVATION_OWNER_UNVERIFIED);
+        }
 
         CommonSpace space = spaceRepository.findById(request.getSpaceId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.SPACE_NOT_FOUND));

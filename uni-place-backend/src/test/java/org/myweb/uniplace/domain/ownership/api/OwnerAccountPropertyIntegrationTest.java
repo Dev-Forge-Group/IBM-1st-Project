@@ -55,10 +55,12 @@ import org.myweb.uniplace.domain.file.repository.UploadFileRepository;
 import org.myweb.uniplace.domain.notification.application.NotificationService;
 import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess;
 import org.myweb.uniplace.domain.property.domain.entity.Building;
+import org.myweb.uniplace.domain.property.domain.entity.CommonSpace;
 import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.domain.property.domain.enums.RoomStatus;
 import org.myweb.uniplace.domain.property.repository.BuildingRepository;
 import org.myweb.uniplace.domain.property.repository.RoomRepository;
+import org.myweb.uniplace.domain.property.repository.SpaceRepository;
 import org.myweb.uniplace.domain.user.domain.entity.User;
 import org.myweb.uniplace.domain.user.domain.enums.AccountKind;
 import org.myweb.uniplace.domain.user.domain.enums.UserRole;
@@ -128,6 +130,7 @@ class OwnerAccountPropertyIntegrationTest {
     @Autowired UserRepository users;
     @Autowired BuildingRepository buildings;
     @Autowired RoomRepository rooms;
+    @Autowired SpaceRepository spaces;
     @Autowired ContractRepository contracts;
     @Autowired ResidentRepository residents;
     @Autowired UploadFileRepository files;
@@ -598,7 +601,7 @@ class OwnerAccountPropertyIntegrationTest {
 
         assertStatus(call("GET", "/rooms/" + roomId, null, null), 200);
         assertNoTourSlots(slotsPath, "TOUR_RSV_400_7");
-        assertTourCreateError(call("POST", createPath, null, booking), "TOUR_RSV_400_7");
+        assertBadRequestCode(call("POST", createPath, null, booking), "TOUR_RSV_400_7");
         assertThat(tourCountForRoom(roomId)).isZero();
         verifyNoInteractions(notifications, slack);
 
@@ -616,7 +619,7 @@ class OwnerAccountPropertyIntegrationTest {
 
         jdbc.update("UPDATE rooms SET room_st='repair' WHERE room_id=?", roomId);
         assertNoTourSlots(slotsPath, "TOUR_RSV_400_3");
-        assertTourCreateError(call("POST", createPath, null, booking), "TOUR_RSV_400_3");
+        assertBadRequestCode(call("POST", createPath, null, booking), "TOUR_RSV_400_3");
         assertThat(tourCountForRoom(roomId)).isZero();
         jdbc.update("UPDATE rooms SET room_st='available' WHERE room_id=?", roomId);
         int tourId = positiveId(data(call("POST", createPath, null, booking)), "tourId");
@@ -625,7 +628,7 @@ class OwnerAccountPropertyIntegrationTest {
                 Map.of("reviewNote", "Synthetic operator access revoked", "expectedUpdatedAt", approved.path("updatedAt"))));
         assertStatus(call("GET", "/rooms/" + roomId, null, null), 200);
         assertNoTourSlots(slotsPath, "TOUR_RSV_400_7");
-        assertTourCreateError(call("POST", createPath, null, booking), "TOUR_RSV_400_7");
+        assertBadRequestCode(call("POST", createPath, null, booking), "TOUR_RSV_400_7");
         JsonNode cancelled = data(call("PUT", createPath + "/cancel/" + tourId, null,
                 Map.of("tourTel", booking.get("tourTel"), "tourPwd", booking.get("tourPwd"))));
         assertThat(cancelled.path("tourSt").asText()).isEqualTo("cancelled");
@@ -644,6 +647,57 @@ class OwnerAccountPropertyIntegrationTest {
         JsonNode rooms = data(call("GET", "/owner/rooms?page=1&size=1", token(f.owner()), null));
         assertThat(rooms.path("totalElements").asLong()).isEqualTo(1);
         assertThat(rooms.path("content").get(0).path("roomId").asInt()).isEqualTo(f.room());
+    }
+
+    @Test
+    void legacySpaceSlotsAndCreationUseCurrentBuildingApprovalAndCapacity() throws Exception {
+        int[] ids = new TransactionTemplate(transactions).execute(status -> {
+            Building legacy = building(buildings, "Synthetic common space pilot building");
+            int roomId = room(rooms, legacy, 901).getRoomId();
+            int spaceId = spaces.saveAndFlush(CommonSpace.builder().building(legacy).spaceNm("Synthetic common room")
+                    .spaceFloor(1).spaceCapacity(2).build()).getSpaceId();
+            return new int[]{legacy.getBuildingId(), roomId, spaceId};
+        });
+        int buildingId = ids[0];
+        int spaceId = ids[2];
+        activeTenancy(f.customer(), ids[1]);
+        String tenant = token(f.customer());
+        assertThat(roleNames(me(tenant))).contains("TENANT");
+        LocalDate day = LocalDate.now(KST).plusDays(2);
+        String path = "/space-reservations";
+        String availability = path + "/spaces?buildingId=" + buildingId + "&date=" + day;
+        Map<String, Object> booking = new LinkedHashMap<>(Map.of("buildingId", buildingId, "spaceId", spaceId,
+                "srStartAt", day + "T10:00:00", "srEndAt", day + "T12:00:00", "srNoPeople", 2));
+
+        assertStatus(call("GET", "/spaces/" + spaceId, null, null), 200);
+        assertSpaceUnavailable(spaceAvailability(availability, tenant, spaceId));
+        assertBadRequestCode(call("POST", path, tenant, booking), "SPACE_RSV_400_5");
+        verifyNoInteractions(notifications, slack);
+        JsonNode claim = data(call("POST", "/users/me/asset-claims", token(f.owner()),
+                Map.of("resourceType", "BUILDING", "resourceId", buildingId, "proofReference", "Synthetic space title")));
+        assertSpaceUnavailable(spaceAvailability(availability, tenant, spaceId));
+
+        String reviewPath = "/admin/asset-claims/BUILDING/" + positiveId(claim, "membershipId");
+        JsonNode approved = data(call("POST", reviewPath + "/approve", staffToken(),
+                Map.of("reviewNote", "Synthetic building title checked", "expectedUpdatedAt", claim.path("updatedAt"))));
+        JsonNode open = spaceAvailability(availability, tenant, spaceId);
+        assertThat(open.hasNonNull("unavailableReason")).isFalse();
+        assertThat(open.path("availableSlots").isEmpty()).isFalse();
+        booking.put("srNoPeople", 3);
+        assertBadRequestCode(call("POST", path, tenant, booking), "SPACE_400_2");
+        verifyNoInteractions(notifications, slack);
+        booking.put("srNoPeople", 2);
+        int reservationId = positiveId(data(call("POST", path, tenant, booking)), "reservationId");
+
+        data(call("POST", reviewPath + "/reject", staffToken(),
+                Map.of("reviewNote", "Synthetic title withdrawn", "expectedUpdatedAt", approved.path("updatedAt"))));
+        assertStatus(call("GET", "/spaces/" + spaceId, null, null), 200);
+        assertSpaceUnavailable(spaceAvailability(availability, tenant, spaceId));
+        assertBadRequestCode(call("POST", path, tenant, booking), "SPACE_RSV_400_5");
+        JsonNode cancelled = data(call("PUT", path + "/cancel/" + reservationId, tenant, null));
+        assertThat(cancelled.path("srSt").asText()).isEqualTo("cancelled");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM space_reservations WHERE space_id=?", Integer.class, spaceId))
+                .isEqualTo(1);
     }
 
     @Test
@@ -730,11 +784,12 @@ class OwnerAccountPropertyIntegrationTest {
         verifyNoInteractions(storage, images, notifications, slack);
     }
 
-    @Test
-    void aPendingCreatedDraftFileIsReadableOnlyByItsOwnerAndNeverReadsStorageForDeniedActors() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"BUILDING", "SPACE"})
+    void aPendingCreatedDraftFileIsReadableOnlyByItsOwnerAndNeverReadsStorageForDeniedActors(String type) throws Exception {
         int id = positiveId(data(upload("POST", "/owner/buildings", buildingFields("Private file draft"),
                 null, null, token(f.owner()))), "buildingId");
-        int file = seedFile("BUILDING", id);
+        int file = seedFile(type, type.equals("SPACE") ? ownerSpace(id) : id);
         clearInvocations(storage, images, notifications, slack);
         Reply anonymous = call("GET", "/files/" + file + "/view", null, null);
         assertThat(anonymous.status()).isBetween(400, 499);
@@ -747,9 +802,14 @@ class OwnerAccountPropertyIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"BUILDING", "ROOM"})
+    @ValueSource(strings = {"BUILDING", "ROOM", "SPACE"})
     void publishedPropertyFileMetadataAlwaysUsesTheAuthorizedProxyEvenWithS3Storage(String type) throws Exception {
-        int parent = type.equals("BUILDING") ? f.building() : f.room();
+        int parent = switch (type) {
+            case "BUILDING" -> f.building();
+            case "ROOM" -> f.room();
+            case "SPACE" -> ownerSpace(f.building());
+            default -> throw new IllegalArgumentException("Unexpected fixture property type: " + type);
+        };
         int file = seedFile(type, parent);
         JsonNode metadata = data(call("GET", "/files/" + file, null, null));
         assertThat(metadata.path("viewUrl").asText()).isEqualTo("/files/" + file + "/view");
@@ -990,6 +1050,12 @@ class OwnerAccountPropertyIntegrationTest {
         return new TransactionTemplate(transactions).execute(status -> file(files, type, parentId).getFileId());
     }
 
+    private int ownerSpace(int buildingId) throws Exception {
+        return positiveId(data(upload("POST", "/owner/spaces",
+                Map.of("buildingId", String.valueOf(buildingId), "spaceNm", "Synthetic photo space",
+                        "spaceFloor", "1", "spaceCapacity", "2"), null, null, token(f.owner()))), "spaceId");
+    }
+
     private String token(String userId) { return jwt.createAccessToken(userId, "user"); }
     private String staffToken() { return jwt.createAccessToken(f.staff(), "admin"); }
 
@@ -1033,7 +1099,7 @@ class OwnerAccountPropertyIntegrationTest {
         HttpResponse<byte[]> response = HTTP.send(request.method(method, body == null
                 ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body)).build(),
                 HttpResponse.BodyHandlers.ofByteArray());
-        return new Reply(response.statusCode(), response.body());
+        return new Reply(response.statusCode(), response.body(), response.headers().firstValue("Cache-Control").orElse(""));
     }
 
     private JsonNode data(Reply response) throws IOException {
@@ -1054,19 +1120,37 @@ class OwnerAccountPropertyIntegrationTest {
     }
 
     private void assertNoTourSlots(String path, String reason) throws Exception {
-        JsonNode result = data(call("GET", path, null, null));
+        Reply response = call("GET", path, null, null);
+        assertThat(response.cacheControl()).contains("no-store").doesNotContain("public");
+        JsonNode result = data(response);
         assertThat(result.path("availableSlots").isArray()).isTrue();
         assertThat(result.path("availableSlots").isEmpty()).isTrue();
         assertThat(result.path("unavailableReason").asText()).isEqualTo(reason);
     }
 
-    private void assertTourCreateError(Reply response, String code) throws IOException {
+    private void assertBadRequestCode(Reply response, String code) throws IOException {
         assertStatus(response, 400);
         assertThat(json.readTree(response.body()).path("errorCode").asText()).isEqualTo(code);
     }
 
     private int tourCountForRoom(int roomId) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM room_reservation WHERE room_id=?", Integer.class, roomId);
+    }
+
+    private JsonNode spaceAvailability(String path, String tenant, int spaceId) throws Exception {
+        Reply response = call("GET", path, tenant, null);
+        JsonNode page = data(response);
+        assertThat(page.path("totalElements").asInt()).isEqualTo(1);
+        JsonNode space = only(findBy(page.path("content"), "spaceId", spaceId));
+        assertThat(space.path("spaceCapacity").asInt()).isEqualTo(2);
+        assertThat(response.cacheControl()).contains("no-store").doesNotContain("public");
+        return space;
+    }
+
+    private static void assertSpaceUnavailable(JsonNode space) {
+        assertThat(space.path("availableSlots").isArray()).isTrue();
+        assertThat(space.path("availableSlots").isEmpty()).isTrue();
+        assertThat(space.path("unavailableReason").asText()).isEqualTo("SPACE_RSV_400_5");
     }
     private static int positiveId(JsonNode node, String key) { int id = node.path(key).asInt(); assertThat(id).isPositive(); return id; }
     private static JsonNode only(List<JsonNode> values) { assertThat(values).hasSize(1); return values.get(0); }
@@ -1222,5 +1306,5 @@ class OwnerAccountPropertyIntegrationTest {
     private record State(long buildings, long rooms, long files, long contracts, long residents,
             long ownerProfiles, long roleGrants, long buildingMemberships, long roomMemberships,
             long contractParties, long reviewEvents) {}
-    private record Reply(int status, byte[] body) {}
+    private record Reply(int status, byte[] body, String cacheControl) {}
 }

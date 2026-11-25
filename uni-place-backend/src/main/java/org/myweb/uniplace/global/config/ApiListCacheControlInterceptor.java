@@ -21,6 +21,10 @@ public class ApiListCacheControlInterceptor implements HandlerInterceptor {
             "/notifications", "/notifications/**"
     );
 
+    private static final List<String> BOOKING_AVAILABILITY_PATHS = List.of(
+            "/tour-reservations/slots", "/space-reservations/spaces"
+    );
+
     private static final List<String> LIST_CACHE_PATH_PATTERNS = List.of(
             "/buildings",
             "/rooms",
@@ -34,8 +38,6 @@ public class ApiListCacheControlInterceptor implements HandlerInterceptor {
             "/notices",
             "/faqs",
             "/tour-reservations/rooms",
-            "/tour-reservations/slots",
-            "/space-reservations/spaces",
             "/admin/common-codes/PRODUCT_CATEGORY"
     );
 
@@ -53,9 +55,9 @@ public class ApiListCacheControlInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         // @ResponseBody may commit the response before postHandle on a real
-        // servlet container, so apply the viewer policy before serialization.
+        // servlet container, so set the cache policy before serialization.
         if ("GET".equalsIgnoreCase(request.getMethod()) && handler instanceof HandlerMethod
-                && isCommunityTarget(requestPath(request))) {
+                && requiresNoStore(requestPath(request))) {
             response.setHeader("Cache-Control", "private, no-store");
         }
         return true;
@@ -80,9 +82,8 @@ public class ApiListCacheControlInterceptor implements HandlerInterceptor {
 
         String path = requestPath(request);
 
-        // Ownership and administrator-only identities vary by viewer. Do not
-        // reuse a public response across guest, owner and administrator sessions.
-        if (isCommunityTarget(path)) {
+        // Community visibility varies by viewer and booking availability changes with approval and bookings.
+        if (requiresNoStore(path)) {
             response.setHeader("Cache-Control", "private, no-store");
             return;
         }
@@ -105,8 +106,8 @@ public class ApiListCacheControlInterceptor implements HandlerInterceptor {
                 .anyMatch(pattern -> pathMatcher.match(pattern, requestPath));
     }
 
-    private boolean isCommunityTarget(String requestPath) {
-        return COMMUNITY_PATH_PATTERNS.stream()
+    private boolean requiresNoStore(String requestPath) {
+        return BOOKING_AVAILABILITY_PATHS.contains(requestPath) || COMMUNITY_PATH_PATTERNS.stream()
                 .anyMatch(pattern -> pathMatcher.match(pattern, requestPath));
     }
 

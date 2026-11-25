@@ -123,4 +123,49 @@ describe('space booking availability', () => {
     await screen.findByText(/AI 추천 시간 자동 선택/);
     expect(submitButton()).toBeEnabled();
   });
+
+  it('explains a building awaiting owner approval and keeps the reservation disabled', async () => {
+    reservations.reservableSpaces.mockResolvedValue({
+      content: [{ ...space(1, 11, DAY, 'Unavailable time'), availableSlots: [],
+        unavailableReason: 'SPACE_RSV_400_5', spaceCapacity: 2 }],
+    });
+    openForm();
+
+    expect(await screen.findByText('소유 관계 확인 후 공용공간을 예약할 수 있습니다.'))
+      .toHaveAttribute('role', 'status');
+    expect(submitButton()).toBeDisabled();
+    expect(reservations.createSpaceReservation).not.toHaveBeenCalled();
+  });
+
+  it('uses the selected space capacity as the limit and permits a booking at the exact limit', async () => {
+    reservations.reservableSpaces.mockResolvedValue({
+      content: [{ ...space(1, 11, DAY, 'Capacity test time'), spaceCapacity: 2 }],
+    });
+    openForm();
+    fireEvent.click(await screen.findByRole('button', { name: 'Capacity test time' }));
+    const people = screen.getByRole('spinbutton');
+    expect(people).toHaveAttribute('max', '2');
+    fireEvent.change(people, { target: { value: '3' } });
+    expect(screen.getByText('예약 인원이 최대 수용 인원(2명)을 초과합니다.')).toBeInTheDocument();
+    expect(submitButton()).toBeDisabled();
+    expect(reservations.createSpaceReservation).not.toHaveBeenCalled();
+
+    fireEvent.change(people, { target: { value: '2' } });
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(reservations.createSpaceReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ spaceId: 11, srNoPeople: 2 }),
+    ));
+  });
+
+  it('accepts an integer when an older space has no configured capacity', async () => {
+    openForm();
+    fireEvent.click(await screen.findByRole('button', { name: 'Eleven 10:00' }));
+    const people = screen.getByRole('spinbutton');
+    expect(people).not.toHaveAttribute('max');
+    fireEvent.change(people, { target: { value: '100' } });
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(reservations.createSpaceReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ spaceId: 11, srNoPeople: 100 }),
+    ));
+  });
 });
