@@ -6,7 +6,7 @@ function getAccessToken() {
 
 async function request(
   path,
-  { method = 'GET', body, headers = {}, auth = false, cache } = {}
+  { method = 'GET', body, headers = {}, auth = false, cache, signal } = {}
 ) {
   const res = await fetchWithAuthRetry(
     path,
@@ -21,6 +21,7 @@ async function request(
       },
       credentials: 'same-origin',
       cache,
+      signal,
       body: body ? JSON.stringify(body) : undefined,
     },
     { auth }
@@ -87,9 +88,11 @@ export const reservationApi = {
     size = 10,
     sort = 'reservationId',
     direct = 'DESC',
+    status,
+    signal,
   } = {}) => {
-    const q = buildQuery({ page, size, sort, direct });
-    return request(`/space-reservations/me${q}`, { auth: true });
+    const q = buildQuery({ page, size, sort, direct, status });
+    return request(`/space-reservations/me${q}`, { auth: true, cache: 'no-store', signal });
   },
 
   cancelSpaceReservation: (reservationId) =>

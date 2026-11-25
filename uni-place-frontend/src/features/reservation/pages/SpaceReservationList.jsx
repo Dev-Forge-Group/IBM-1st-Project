@@ -1,5 +1,5 @@
 // features/reservation/pages/SpaceReservationList.jsx
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import useSpaceReservations from '../hooks/useSpaceReservations';
 import Header from '../../../app/layouts/components/Header';
@@ -74,11 +74,8 @@ export default function SpaceReservationList({
   const nav = useNavigate();
   const { myQuery, setMyQuery, myPage, myLoading, myError, reloadMy, cancel } =
     useSpaceReservations();
-  const [statusFilter, setStatusFilter] = useState('all');
-  const allItems = myPage?.content ?? [];
-  const items = statusFilter === 'all'
-    ? allItems
-    : allItems.filter((it) => (it.srSt ?? it.status) === statusFilter);
+  const statusFilter = myQuery.status;
+  const items = myPage?.content ?? [];
 
   const onCancel = async (reservationId) => {
     if (!window.confirm('예약을 취소하시겠습니까?')) return;
@@ -97,7 +94,7 @@ export default function SpaceReservationList({
       <div className={styles.topRow}>
         <div className={styles.filterChips}>
           {[
-            { value: 'all', label: '전체' },
+            { value: '', label: '전체' },
             { value: 'requested', label: '대기' },
             { value: 'confirmed', label: '확정' },
             { value: 'cancelled', label: '취소' },
@@ -107,7 +104,9 @@ export default function SpaceReservationList({
               key={f.value}
               type="button"
               className={`${styles.filterChip} ${statusFilter === f.value ? styles.filterChipActive : ''}`}
-              onClick={() => setStatusFilter(f.value)}
+              aria-pressed={statusFilter === f.value}
+              onClick={() => setMyQuery((previous) => previous.status === f.value
+                ? previous : { ...previous, status: f.value, page: 1 })}
             >
               {f.label}
             </button>
@@ -141,7 +140,7 @@ export default function SpaceReservationList({
       )}
       {myError && <p className={styles.errMsg}>{myError}</p>}
 
-      {!myLoading && items.length === 0 && (
+      {!myLoading && !myError && items.length === 0 && (
         <div className={styles.empty}>
           <span className={styles.emptyIcon}>🛋️</span>
           <p>예약 내역이 없습니다.</p>
@@ -185,7 +184,7 @@ export default function SpaceReservationList({
         <button
           className={styles.pageBtn}
           type="button"
-          disabled={items.length < (myQuery.size ?? 10)}
+          disabled={myLoading || myQuery.page >= (myPage?.totalPages ?? 0)}
           onClick={() => setMyQuery((p) => ({ ...p, page: p.page + 1 }))}
         >
           다음

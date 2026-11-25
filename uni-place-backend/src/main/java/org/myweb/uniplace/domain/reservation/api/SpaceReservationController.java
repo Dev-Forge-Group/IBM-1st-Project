@@ -9,6 +9,7 @@ import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservableRes
 import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservationBuildingResponse;
 import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservationResponse;
 import org.myweb.uniplace.domain.reservation.application.SpaceReservationService;
+import org.myweb.uniplace.domain.reservation.domain.enums.SpaceReservationStatus;
 import org.myweb.uniplace.global.response.ApiResponse;
 import org.myweb.uniplace.global.response.PageResponse;
 import org.myweb.uniplace.global.security.AuthUser;
@@ -71,6 +72,7 @@ public class SpaceReservationController {
     @GetMapping("/me")
     public ApiResponse<PageResponse<SpaceReservationResponse>> myReservations(
             @AuthenticationPrincipal AuthUser me,
+            @RequestParam(name = "status", required = false) SpaceReservationStatus status,
             @RequestParam(name = "page", defaultValue = "1") int page,
             @RequestParam(name = "size", defaultValue = "10") int size,
             @RequestParam(name = "sort", defaultValue = "reservationId") String sort,
@@ -85,7 +87,7 @@ public class SpaceReservationController {
         Pageable pageable = PageRequest.of(page - 1, size, direction, sort);
 
         return ApiResponse.ok(PageResponse.of(
-                spaceReservationService.myReservations(me, pageable)
+                spaceReservationService.myReservations(me, status, pageable)
         ));
     }
 

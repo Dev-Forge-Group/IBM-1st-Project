@@ -9,6 +9,7 @@ import org.myweb.uniplace.domain.reservation.api.dto.request.CreateSpaceReservat
 import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservableResponse;
 import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservationBuildingResponse;
 import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservationResponse;
+import org.myweb.uniplace.domain.reservation.domain.enums.SpaceReservationStatus;
 import org.myweb.uniplace.global.security.AuthUser;
 
 import org.springframework.data.domain.Page;
@@ -24,7 +25,7 @@ public interface SpaceReservationService {
 
     SpaceReservationResponse cancel(AuthUser me, Integer reservationId);
 
-    Page<SpaceReservationResponse> myReservations(AuthUser me, Pageable pageable);
+    Page<SpaceReservationResponse> myReservations(AuthUser me, SpaceReservationStatus status, Pageable pageable);
 
     /* =========================
        ✅ ADMIN

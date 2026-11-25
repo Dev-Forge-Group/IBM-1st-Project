@@ -14,6 +14,8 @@
 
 `GET /space-reservations/buildings`는 현재 회원의 한국 날짜 기준 유효한 계약과 해당 계약의 입주 기록을 조회해 일치하는 공개 건물을 예약 화면에 표시한다. 새로고침에서 건물이 제외되면 그 건물의 시간 선택도 해제한다.
 
+내 공용공간 예약은 `GET /space-reservations/me?status=...`에서 본인 예약에 상태 필터를 적용한 뒤 페이지를 계산한다. 화면은 응답의 전체 페이지 수로 이동하고 상태 변경 시 첫 페이지를 조회한다. 취소 후 페이지 수가 줄면 남아 있는 마지막 페이지로 이동한다.
+
 `ReservationAvailabilityIntegrationTest`는 실제 MySQL/Flyway와 공개 서비스를 사용해 두 제품의 비정형 이력·인접 시간·비활성 상태·다른 대상 격리·날짜 경계·정상 생성을 검사한다. property 목록 공급과 Notification/Slack은 mock한다. 기존 코드에서 6개 중 5개가 실패했고, 수정 뒤 6개 모두 통과했다. CI는 이 suite가 누락되거나 skip이면 실패한다.
 
 이번 변경은 가용 시간 조회와 입력 검증의 수선이다. 동시 요청의 최종 성공 여부를 가용 시간 목록이 보장하지는 않는다. 공용공간의 활성 슬롯 유일성과 버전은 기존 [V15 계약](space-reservation-concurrency.md)을 유지한다. 투어의 [전화 표기 호환](tour-telephone-compatibility.md)과 [관리자 복구](tour-admin-restoration.md)는 각 계약과 실제 MySQL 회귀에서 검증한다. 신규 서비스의 Tour 쓰기는 [IBM-03의 V16 guard](tour-reservation-concurrency.md)를 따르며, 일반 가용 시간 조회는 이 잠금을 사용하지 않는다. 가용 시간 수선 자체에는 새 DB 마이그레이션을 추가하지 않았다.

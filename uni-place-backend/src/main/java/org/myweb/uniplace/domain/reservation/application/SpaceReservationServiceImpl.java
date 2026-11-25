@@ -343,14 +343,13 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<SpaceReservationResponse> myReservations(AuthUser me, Pageable pageable) {
+    public Page<SpaceReservationResponse> myReservations(AuthUser me, SpaceReservationStatus status, Pageable pageable) {
 
         requireMember(me);
 
-        Page<SpaceReservationEntity> page = spaceReservationRepository.findByUser_UserId(
-                me.getUserId(),
-                pageable
-        );
+        Page<SpaceReservationEntity> page = status == null
+                ? spaceReservationRepository.findByUser_UserId(me.getUserId(), pageable)
+                : spaceReservationRepository.findByUser_UserIdAndSrSt(me.getUserId(), status, pageable);
 
         return page.map(SpaceReservationResponse::fromEntity);
     }

@@ -741,6 +741,38 @@ class OwnerAccountPropertyIntegrationTest {
     }
 
     @Test
+    void spaceHistoryFiltersMemberAndStatusBeforePagination() throws Exception {
+        int spaceId = ownerSpace(f.building());
+        LocalDate day = LocalDate.now(KST).plusDays(2);
+        String insert = """
+                INSERT INTO space_reservations(building_id,space_id,user_id,sr_start_at,sr_end_at,sr_no_people,sr_st)
+                VALUES(?,?,?,?,?,1,?)
+                """;
+        List<String> states = List.of("confirmed", "requested", "confirmed", "cancelled", "requested");
+        for (int i = 0; i < states.size(); i++) {
+            LocalDateTime start = day.atTime(8 + i * 2, 0);
+            jdbc.update(insert, f.building(), spaceId, f.customer(), start, start.plusHours(2), states.get(i));
+        }
+        jdbc.update(insert, f.building(), spaceId, f.applicant(), day.atTime(18, 0), day.atTime(20, 0), "confirmed");
+
+        String path = "/space-reservations/me";
+        String member = token(f.customer());
+        JsonNode all = data(call("GET", path + "?page=1&size=1", member, null));
+        assertThat(all.path("totalElements").asInt()).isEqualTo(5);
+        JsonNode first = data(call("GET", path + "?status=confirmed&page=1&size=1", member, null));
+        assertThat(first.path("totalElements").asInt()).isEqualTo(2);
+        assertThat(first.path("totalPages").asInt()).isEqualTo(2);
+        assertThat(first.path("content").size()).isEqualTo(1);
+        assertThat(first.path("content").get(0).path("srSt").asText()).isEqualTo("confirmed");
+        assertThat(LocalDateTime.parse(first.path("content").get(0).path("srStartAt").asText())).isEqualTo(day.atTime(12, 0));
+        JsonNode second = data(call("GET", path + "?status=confirmed&page=2&size=1", member, null));
+        assertThat(second.path("page").asInt()).isEqualTo(2);
+        assertThat(LocalDateTime.parse(second.path("content").get(0).path("srStartAt").asText())).isEqualTo(day.atTime(8, 0));
+        assertThat(data(call("GET", path + "?status=ended", member, null)).path("totalElements").asInt()).isZero();
+        assertStatus(call("GET", path + "?status=unrecognized", member, null), 400);
+    }
+
+    @Test
     void crossOwnerRoomCreationAndReparentingFailBeforeWritesOrStorage() throws Exception {
         State before = state();
         Map<String, String> create = roomFields(f.otherBuilding(), f.otherBuildingName(), 902);
