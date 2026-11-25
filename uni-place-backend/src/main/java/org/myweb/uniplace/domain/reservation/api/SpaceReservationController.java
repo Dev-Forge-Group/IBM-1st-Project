@@ -2,9 +2,11 @@
 package org.myweb.uniplace.domain.reservation.api;
 
 import java.time.LocalDate;
+import java.util.List;
 
 import org.myweb.uniplace.domain.reservation.api.dto.request.CreateSpaceReservationRequest;
 import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservableResponse;
+import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservationBuildingResponse;
 import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservationResponse;
 import org.myweb.uniplace.domain.reservation.application.SpaceReservationService;
 import org.myweb.uniplace.global.response.ApiResponse;
@@ -26,6 +28,11 @@ import lombok.RequiredArgsConstructor;
 public class SpaceReservationController {
 
     private final SpaceReservationService spaceReservationService;
+
+    @GetMapping("/buildings")
+    public ApiResponse<List<SpaceReservationBuildingResponse>> reservableBuildings(@AuthenticationPrincipal AuthUser me) {
+        return ApiResponse.ok(spaceReservationService.reservableBuildings(me));
+    }
 
     // ✅ 건물 -> 공용공간 + 예약가능(고정) 시간대 조회
     // 예) /space-reservations/spaces?buildingId=1&date=2026-02-22&page=1&size=10

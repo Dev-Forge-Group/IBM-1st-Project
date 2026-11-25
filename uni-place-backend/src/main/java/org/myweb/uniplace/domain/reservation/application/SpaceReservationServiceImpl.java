@@ -19,6 +19,7 @@ import org.myweb.uniplace.domain.ownership.application.publicapi.OwnershipAccess
 import org.myweb.uniplace.domain.reservation.api.dto.request.CancelSpaceReservationRequest;
 import org.myweb.uniplace.domain.reservation.api.dto.request.CreateSpaceReservationRequest;
 import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservableResponse;
+import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservationBuildingResponse;
 import org.myweb.uniplace.domain.reservation.api.dto.response.SpaceReservationResponse;
 import org.myweb.uniplace.domain.reservation.domain.entity.SpaceReservationEntity;
 import org.myweb.uniplace.domain.reservation.domain.enums.SpaceFixedSlot;
@@ -54,6 +55,8 @@ import lombok.RequiredArgsConstructor;
 @Transactional
 public class SpaceReservationServiceImpl implements SpaceReservationService {
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
     private final SpaceReservationRepository spaceReservationRepository;
     private final BuildingRepository buildingRepository;
     private final SpaceRepository spaceRepository;
@@ -76,6 +79,18 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
     /* =========================
        ✅ RESERVABLE
        ========================= */
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SpaceReservationBuildingResponse> reservableBuildings(AuthUser me) {
+        requireMember(me);
+        return contractRepository.findActiveResidentBuildings(me.getUserId(), ContractStatus.active, LocalDate.now(KST))
+                .stream()
+                .filter(building -> ownership.isPublicBuilding(building.getBuildingId()))
+                .map(building -> new SpaceReservationBuildingResponse(building.getBuildingId(),
+                        building.getBuildingNm(), building.getBuildingAddr()))
+                .toList();
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -166,7 +181,7 @@ public class SpaceReservationServiceImpl implements SpaceReservationService {
 
         // ✅ 같은 건물에 active 계약이 있는 입주자만 예약 가능
         boolean hasActiveContract = contractRepository.existsActiveResidentContractByUserAndBuilding(
-                me.getUserId(), request.getBuildingId(), ContractStatus.active, LocalDate.now(ZoneId.of("Asia/Seoul"))
+                me.getUserId(), request.getBuildingId(), ContractStatus.active, LocalDate.now(KST)
         );
         if (!hasActiveContract) {
             throw new BusinessException(ErrorCode.SPACE_RESERVATION_BUILDING_MISMATCH);

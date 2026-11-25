@@ -6,7 +6,7 @@ import SpaceReservationCreate from './SpaceReservationCreate';
 const { property, contracts, reservations } = vi.hoisted(() => ({
   property: { getBuildings: vi.fn() },
   contracts: { myContracts: vi.fn() },
-  reservations: { reservableSpaces: vi.fn(), createSpaceReservation: vi.fn() },
+  reservations: { reservableSpaceBuildings: vi.fn(), reservableSpaces: vi.fn(), createSpaceReservation: vi.fn() },
 }));
 
 vi.mock('../../property/api/propertyApi', () => ({ propertyApi: property }));
@@ -53,8 +53,7 @@ function submitButton() {
 describe('space booking availability', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    property.getBuildings.mockResolvedValue({ content: BUILDINGS });
-    contracts.myContracts.mockResolvedValue(BUILDINGS.map(({ buildingId }) => ({ buildingId, contractStatus: 'active' })));
+    reservations.reservableSpaceBuildings.mockResolvedValue(BUILDINGS);
     reservations.reservableSpaces.mockImplementation(({ buildingId, date }) => Promise.resolve({
       content: buildingId === 1
         ? [space(1, 11, date, 'Eleven 10:00'), space(1, 12, date, 'Twelve 10:00')]
@@ -65,6 +64,29 @@ describe('space booking availability', () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+  });
+
+  it('opens an eligible building even when it is absent from the public building page', async () => {
+    property.getBuildings.mockResolvedValue({ content: [BUILDINGS[1]] });
+    reservations.reservableSpaceBuildings.mockResolvedValue([BUILDINGS[0]]);
+    openForm();
+    expect(await screen.findByRole('button', { name: 'Eleven 10:00' })).toBeInTheDocument();
+    expect(property.getBuildings).not.toHaveBeenCalled();
+    expect(contracts.myContracts).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Second building' })).not.toBeInTheDocument();
+  });
+
+  it('clears old space choices when an refreshed building list no longer includes their building', async () => {
+    reservations.reservableSpaceBuildings.mockResolvedValueOnce(BUILDINGS).mockResolvedValue([]);
+    openForm();
+    fireEvent.click(await screen.findByRole('button', { name: 'Eleven 10:00' }));
+    expect(submitButton()).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+    await screen.findByText('현재 공용공간 예약이 가능한 계약 건물이 없습니다.');
+    expect(submitButton()).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Eleven 10:00' })).not.toBeInTheDocument();
+    expect(reservations.createSpaceReservation).not.toHaveBeenCalled();
   });
 
   it('loads the Seoul calendar date when no recommendation specifies a date', async () => {

@@ -2,9 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
-import { propertyApi } from '../../property/api/propertyApi';
 import { reservationApi } from '../api/reservationApi';
-import { contractApi } from '../../contract/api/contractApi';
 import { useAuth } from '../../user/hooks/useAuth';
 import Header from '../../../app/layouts/components/Header';
 import Footer from '../../../app/layouts/components/Footer';
@@ -59,17 +57,23 @@ export default function SpaceReservationCreate({
     }
   }, [authLoading, user, nav, inlineMode]);
 
-  const [buildings, setBuildings] = useState([]);
-  const [bLoading, setBLoading] = useState(false);
-  const [bError, setBError] = useState('');
-  const [selectedBuilding, setSelectedBuilding] = useState(null);
-  const buildingId = Number(selectedBuilding?.buildingId) || null;
+  const userId = user?.userId;
+  const [buildingResult, setBuildingResult] = useState(null);
+  const [buildingRefresh, setBuildingRefresh] = useState(0);
+  const [selectedBuildingId, setSelectedBuildingId] = useState(null);
+  const currentBuildings = !authLoading && buildingResult?.userId === userId
+    && buildingResult?.refresh === buildingRefresh ? buildingResult : null;
+  const buildings = currentBuildings?.buildings ?? EMPTY_ITEMS;
+  const bLoading = Boolean(userId && !authLoading && !currentBuildings);
+  const bError = currentBuildings?.error;
+  const selectedBuilding = buildings.find((building) => building.buildingId === selectedBuildingId);
+  const buildingId = selectedBuilding?.buildingId ?? null;
 
   const today = todayInSeoul();
   const [date, setDate] = useState(initDateFromAi ?? today);
   const [availability, setAvailability] = useState(null);
   const [submitError, setSubmitError] = useState('');
-  const availabilityKey = buildingId && date ? JSON.stringify([buildingId, date]) : null;
+  const availabilityKey = buildingId && date ? JSON.stringify([buildingId, date, buildingRefresh]) : null;
   const currentAvailability = availability?.key === availabilityKey ? availability : null;
   const spaces = currentAvailability?.spaces ?? EMPTY_ITEMS;
   const spacesLoading = Boolean(availabilityKey && !currentAvailability);
@@ -84,56 +88,24 @@ export default function SpaceReservationCreate({
   // AI 추천 시간 자동 선택 (availableSlots 로드 후)
   const aiSlotAppliedRef = React.useRef(false);
 
-  const loadBuildings = async () => {
-    setBLoading(true);
-    setBError('');
-    try {
-      // 내 계약 목록에서 active 상태인 건물만 필터링
-      const contracts = await contractApi.myContracts();
-      const activeBuildingIds = new Set(
-        (contracts ?? [])
-          .filter(
-            (c) => String(c.contractStatus ?? '').toLowerCase() === 'active'
-          )
-          .map((c) => c.buildingId)
-      );
-      if (activeBuildingIds.size === 0) {
-        setBuildings([]);
-        setBError(
-          '현재 활성 계약이 없습니다. 공용공간 예약은 계약 중인 건물만 가능합니다.'
-        );
-        setBLoading(false);
-        return;
-      }
-      const page = await propertyApi.getBuildings({
-        page: 1,
-        size: 50,
-        sort: 'buildingId',
-        direct: 'DESC',
+  useEffect(() => {
+    if (authLoading || !userId) return;
+    let current = true;
+    reservationApi.reservableSpaceBuildings().then((data) => {
+      if (!current) return;
+      const eligible = Array.isArray(data) ? data : EMPTY_ITEMS;
+      setBuildingResult({ userId, refresh: buildingRefresh, buildings: eligible });
+      setSelectedBuildingId((previous) => {
+        if (eligible.some((building) => building.buildingId === previous)) return previous;
+        return eligible.find((building) => building.buildingId === Number(initBuildingId))?.buildingId ?? null;
       });
-      const filtered = (page?.content ?? []).filter((b) =>
-        activeBuildingIds.has(Number(b.buildingId))
-      );
-      setBuildings(filtered);
-    } catch (e) {
-      setBError(e?.message || '빌딩 조회 실패');
-      setBuildings([]);
-    } finally {
-      setBLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadBuildings();
-  }, []);
-
-  useEffect(() => {
-    if (!initBuildingId || !buildings.length) return;
-    const found = buildings.find(
-      (b) => Number(b.buildingId) === Number(initBuildingId)
-    );
-    if (found) setSelectedBuilding((previous) => previous ?? found);
-  }, [buildings, initBuildingId]);
+    }).catch((error) => {
+      if (current) {
+        setBuildingResult({ userId, refresh: buildingRefresh, error: error?.message || '예약 건물을 불러오지 못했습니다.' });
+      }
+    });
+    return () => { current = false; };
+  }, [authLoading, buildingRefresh, initBuildingId, userId]);
 
   useEffect(() => {
     setAvailability(null);
@@ -237,23 +209,22 @@ export default function SpaceReservationCreate({
           <button
             className={styles.refreshBtn}
             type="button"
-            onClick={loadBuildings}
+            onClick={() => setBuildingRefresh((previous) => previous + 1)}
             disabled={bLoading}
           >
             {bLoading ? '조회중…' : '새로고침'}
           </button>
         </div>
         {bError && <p className={styles.errMsg}>{bError}</p>}
-        {!bLoading && buildings.length === 0 && !bError && (
+        {currentBuildings && buildings.length === 0 && !bError && (
           <p className={styles.errMsg}>
-            ⚠ 현재 계약 중인 건물이 없습니다. 공용공간 예약은 활성 계약이 있는
-            건물만 가능합니다.
+            현재 공용공간 예약이 가능한 계약 건물이 없습니다.
           </p>
         )}
         <BuildingSlotButtons
           buildings={buildings}
           selectedId={selectedBuilding?.buildingId}
-          onSelect={setSelectedBuilding}
+          onSelect={(building) => setSelectedBuildingId(building.buildingId)}
         />
         {selectedBuilding && (
           <p className={styles.selectedHint}>

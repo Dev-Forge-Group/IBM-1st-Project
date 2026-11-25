@@ -3,10 +3,12 @@ package org.myweb.uniplace.domain.contract.repository;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 import org.myweb.uniplace.domain.contract.domain.entity.Contract;
 import org.myweb.uniplace.domain.contract.domain.enums.ContractStatus;
+import org.myweb.uniplace.domain.property.domain.entity.Building;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -149,16 +151,23 @@ public interface ContractRepository extends JpaRepository<Contract, Integer>, Jp
             @Param("status") ContractStatus status
     );
 
-    @Query("""
-        select count(c) > 0 from Contract c
-        where c.user.userId = :userId and c.room.building.buildingId = :buildingId
+    String ACTIVE_RESIDENT_BUILDING_SCOPE = """
+        from Contract c join c.room room join room.building building
+        where c.user.userId = :userId
           and c.contractSt = :status and c.contractStart <= :today and c.contractEnd >= :today
-          and exists (select r.residentId from Resident r where r.contractId = c.contractId
-                      and r.userId = :userId and r.buildingId = :buildingId)
-    """)
+          and upper(coalesce(room.deleteYn, 'N')) <> 'Y'
+          and exists (select resident.residentId from Resident resident where resident.contractId = c.contractId
+                      and resident.userId = :userId and resident.buildingId = building.buildingId)
+        """;
+
+    @Query("select count(c) > 0 " + ACTIVE_RESIDENT_BUILDING_SCOPE + " and building.buildingId = :buildingId")
     boolean existsActiveResidentContractByUserAndBuilding(
             @Param("userId") String userId, @Param("buildingId") Integer buildingId,
             @Param("status") ContractStatus status, @Param("today") LocalDate today);
+
+    @Query("select distinct building " + ACTIVE_RESIDENT_BUILDING_SCOPE + " order by building.buildingId desc")
+    List<Building> findActiveResidentBuildings(
+            @Param("userId") String userId, @Param("status") ContractStatus status, @Param("today") LocalDate today);
 
     @Query("""
         select c

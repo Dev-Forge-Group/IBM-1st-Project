@@ -22,7 +22,7 @@ public class ApiListCacheControlInterceptor implements HandlerInterceptor {
     );
 
     private static final List<String> BOOKING_AVAILABILITY_PATHS = List.of(
-            "/tour-reservations/slots", "/space-reservations/spaces"
+            "/tour-reservations/slots", "/space-reservations/spaces", "/space-reservations/buildings"
     );
 
     private static final List<String> LIST_CACHE_PATH_PATTERNS = List.of(

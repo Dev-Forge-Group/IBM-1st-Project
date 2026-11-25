@@ -64,6 +64,8 @@ function buildQuery(params = {}) {
 
 export const reservationApi = {
   // ===== SpaceReservationController =====
+  reservableSpaceBuildings: () => request('/space-reservations/buildings', { auth: true, cache: 'no-store' }),
+
   reservableSpaces: ({
     buildingId,
     date,

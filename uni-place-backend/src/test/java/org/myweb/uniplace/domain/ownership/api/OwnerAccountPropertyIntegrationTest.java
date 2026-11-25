@@ -701,6 +701,46 @@ class OwnerAccountPropertyIntegrationTest {
     }
 
     @Test
+    void memberSpaceBuildingListUsesCurrentResidentContractsAndDoesNotCoverOtherAccounts() throws Exception {
+        String path = "/space-reservations/buildings";
+        String tenant = token(f.customer());
+        assertStatus(call("GET", path, null, null), 401);
+        assertStatus(call("GET", path, staffToken(), null), 403);
+        assertThat(data(call("GET", path, tenant, null)).isEmpty()).isTrue();
+
+        int current = activeTenancy(f.customer(), f.room());
+        int second = activeTenancy(f.customer(), f.otherRoom());
+        LocalDate today = LocalDate.now(KST);
+        jdbc.update("UPDATE contract SET contract_start=?, contract_end=? WHERE contract_id=?", today, today, current);
+        Reply response = call("GET", path, tenant, null);
+        assertThat(response.cacheControl()).contains("private", "no-store");
+        JsonNode eligible = data(response);
+        assertThat(eligible.size()).isEqualTo(2);
+        JsonNode building = only(findBy(eligible, "buildingId", f.building()));
+        assertThat(building.path("buildingNm").asText()).isEqualTo(f.buildingName());
+        assertThat(building.path("buildingAddr").asText()).isNotBlank();
+        assertThat(building.size()).isEqualTo(3);
+        assertThat(data(call("GET", path + "?userId=" + f.customer(), token(f.applicant()), null)).isEmpty()).isTrue();
+
+        jdbc.update("UPDATE contract SET contract_end=? WHERE contract_id=?", today.minusDays(1), second);
+        assertThat(data(call("GET", path, tenant, null)).size()).isEqualTo(1);
+        jdbc.update("UPDATE contract SET contract_end=? WHERE contract_id=?", today.plusDays(1), second);
+        jdbc.update("UPDATE residents SET building_id=? WHERE contract_id=?", f.building(), second);
+        assertThat(data(call("GET", path, tenant, null)).size()).isEqualTo(1);
+        jdbc.update("UPDATE residents SET building_id=? WHERE contract_id=?", f.otherBuilding(), second);
+        jdbc.update("UPDATE rooms SET delete_yn='Y' WHERE room_id=?", f.otherRoom());
+        assertThat(data(call("GET", path, tenant, null)).size()).isEqualTo(1);
+
+        LocalDate bookingDay = today.plusDays(1);
+        Reply denied = call("POST", "/space-reservations", tenant,
+                Map.of("buildingId", f.otherBuilding(), "spaceId", 1, "srStartAt", bookingDay + "T10:00:00",
+                        "srEndAt", bookingDay + "T12:00:00", "srNoPeople", 1));
+        assertStatus(denied, 403);
+        assertThat(json.readTree(denied.body()).path("errorCode").asText()).isEqualTo("SPACE_RSV_403_3");
+        verifyNoInteractions(notifications, slack);
+    }
+
+    @Test
     void crossOwnerRoomCreationAndReparentingFailBeforeWritesOrStorage() throws Exception {
         State before = state();
         Map<String, String> create = roomFields(f.otherBuilding(), f.otherBuildingName(), 902);
