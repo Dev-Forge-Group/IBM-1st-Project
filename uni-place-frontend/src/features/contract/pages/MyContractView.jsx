@@ -10,6 +10,14 @@ import { getOrCreateDeviceId, tokenStore } from '../../../app/http/tokenStore';
 import { fileApi, savePrivateFileBlob, toApiImageUrl } from '../../file/api/fileApi';
 import styles from './MyContractView.module.css';
 
+const CONTRACT_STATUS_LABELS = {
+  requested: '승인 대기',
+  approved: '승인 완료',
+  active: '활성',
+  ended: '만료',
+  cancelled: '취소',
+};
+
 /* ─── 이미지 갤러리 ───────────────────────────────────────────── */
 function ImageGallery({ files }) {
   const [active, setActive] = useState(0);
@@ -463,14 +471,7 @@ function ContractCard({ contract, noOverlay = false }) {
                   : styles.chipExpired
             }`}
           >
-            {contract.contractStatus === 'active'
-              ? '활성'
-              : contract.contractStatus === 'requested' ||
-                  contract.contractStatus === 'approved'
-                ? '승인대기'
-                : contract.contractStatus === 'ended'
-                  ? '만료'
-                  : (contract.contractStatus ?? '-')}
+            {CONTRACT_STATUS_LABELS[contract.contractStatus] ?? contract.contractStatus ?? '-'}
           </span>
           <span className={styles.chevron}>{expanded ? '▲' : '▼'}</span>
         </div>
@@ -562,7 +563,7 @@ function ContractCard({ contract, noOverlay = false }) {
 }
 
 /* ─── 메인 컴포넌트 ───────────────────────────────────────────── */
-export default function MyContractView({ noOverlay = false }) {
+export default function MyContractView({ noOverlay = false, focusContractId = null }) {
   const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -608,9 +609,11 @@ export default function MyContractView({ noOverlay = false }) {
     );
   }
 
+  const focused = focusContractId && contracts.find((contract) => String(contract.contractId) === focusContractId);
+  const ordered = focused ? [focused, ...contracts.filter((contract) => contract !== focused)] : contracts;
   return (
     <div className={styles.wrap}>
-      {contracts.map((c) => (
+      {ordered.map((c) => (
         <ContractCard key={c.contractId} contract={c} noOverlay={noOverlay} />
       ))}
     </div>

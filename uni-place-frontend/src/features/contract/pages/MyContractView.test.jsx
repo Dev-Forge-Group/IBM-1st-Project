@@ -36,7 +36,7 @@ async function reject(request) {
   await act(async () => { request.reject(new Error('Obsolete document failure')); await request.promise.catch(() => {}); });
 }
 
-function view() { return <MemoryRouter><MyContractView /></MemoryRouter>; }
+function view(props = {}) { return <MemoryRouter><MyContractView {...props} /></MemoryRouter>; }
 
 async function openDocument() {
   fireEvent.click(await screen.findByRole('button', { name: /계약서 보기/ }));
@@ -67,6 +67,20 @@ describe('contract documents use authenticated blobs rather than storage URLs', 
     anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
+
+  it.each([['2', 2], ['999999', 1]])('orders only the member’s returned contracts for a requested ID %s', async (focusContractId, firstId) => {
+    contracts.myContracts.mockResolvedValue([
+      { ...contract, contractStatus: 'requested' },
+      { ...contract, contractId: 2, contractStatus: 'approved' },
+    ]);
+    render(view({ focusContractId }));
+    const requested = await screen.findByRole('button', { name: /계약 #1/ });
+    const approved = screen.getByRole('button', { name: /계약 #2/ });
+    expect(requested).toHaveTextContent('승인 대기');
+    expect(approved).toHaveTextContent('승인 완료');
+    expect(screen.getAllByRole('button', { name: /계약 #/ })[0]).toHaveTextContent(`계약 #${firstId}`);
+    expect(screen.queryByRole('button', { name: /계약 #999999/ })).not.toBeInTheDocument();
+  });
 
   it('loads only the fixed file ID and stores successful reauthentication tokens before opening it', async () => {
     documents.getPrivateFileBlob.mockImplementationOnce(async () => {

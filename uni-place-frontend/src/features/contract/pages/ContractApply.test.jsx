@@ -159,6 +159,17 @@ describe('contract application requires a nonempty signature and preserves recov
     expect(screen.getByRole('heading', { name: '계약 신청이 완료되었습니다!' })).toBeInTheDocument();
   });
 
+  it('shows the application number and links to the submitted contract', async () => {
+    const { form, fileInput } = await readyForm();
+    contracts.createContract.mockResolvedValueOnce({ contractId: 143, contractStatus: 'requested' });
+    choose(fileInput, signature());
+    fireEvent.submit(form);
+    expect(await screen.findByText(/신청 번호 #143/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '내 계약 보기' })).toHaveAttribute(
+      'href', '/me?tab=myroom&sub=contracts&contractId=143',
+    );
+  });
+
   it('rejects an initially empty signature before creating a reader, showing a preview or submitting', async () => {
     const { form, fileInput } = await readyForm();
     choose(fileInput, emptySignature());

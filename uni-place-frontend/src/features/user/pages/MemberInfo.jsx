@@ -1291,7 +1291,9 @@ export default function MemberInfo() {
                   월세 결제
                 </button>
               </div>
-              {myRoomSubTab === 'contracts' && <MyContractView noOverlay />}
+              {myRoomSubTab === 'contracts' && (
+                <MyContractView key={user?.userId} focusContractId={searchParams.get('contractId')} noOverlay />
+              )}
               {myRoomSubTab === 'rent-payment' && (
                 <MyMonthlyCharges
                   focusContractId={searchParams.get('contractId')}

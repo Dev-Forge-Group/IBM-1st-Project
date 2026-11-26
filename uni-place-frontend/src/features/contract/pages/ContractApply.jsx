@@ -1,6 +1,6 @@
 // features/contract/pages/ContractApply.jsx
 import { useState, useEffect, useRef } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import Header from '../../../app/layouts/components/Header';
 import Footer from '../../../app/layouts/components/Footer';
 import Modal from '../../../shared/components/Modal/Modal';
@@ -79,7 +79,7 @@ function ContractApplication({ roomId, user, authLoading }) {
   /* 제출 */
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
-  const [submitOk, setSubmitOk] = useState(false);
+  const [receipt, setReceipt] = useState(null);
   const submitRef = useRef(false);
   const minContractEnd = form.contractStart
     ? addContractDays(form.contractStart, MIN_CONTRACT_DAYS)
@@ -280,7 +280,7 @@ function ContractApplication({ roomId, user, authLoading }) {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await contractApi.createContract({
+      const created = await contractApi.createContract({
         roomId,
         contractStart: form.contractStart,
         contractEnd: form.contractEnd,
@@ -291,7 +291,8 @@ function ContractApplication({ roomId, user, authLoading }) {
         lessorRrn: form.lessorRrn,
         signFile,
       });
-      setSubmitOk(true);
+      const contractId = created?.contractId;
+      setReceipt({ contractId: Number.isSafeInteger(contractId) && contractId > 0 ? contractId : null });
     } catch (err) {
       setSubmitError(
         err?.response?.data?.message ||
@@ -335,7 +336,9 @@ function ContractApplication({ roomId, user, authLoading }) {
   }
 
   /* ── 신청 완료 ── */
-  if (submitOk) {
+  if (receipt) {
+    const contractsQuery = new URLSearchParams({ tab: 'myroom', sub: 'contracts' });
+    if (receipt.contractId) contractsQuery.set('contractId', String(receipt.contractId));
     return (
       <div className={styles.page}>
         <Header />
@@ -344,12 +347,12 @@ function ContractApplication({ roomId, user, authLoading }) {
           <h2 className={styles.successTitle}>계약 신청이 완료되었습니다!</h2>
           <p className={styles.successDesc}>
             소유주가 신청을 검토합니다.
-            <br />
-            마이페이지에서 계약 상태를 확인하세요.
+            {receipt.contractId && <><br />신청 번호 #{receipt.contractId}</>}
           </p>
           <div className={styles.successActions}>
+            <Link className={styles.primaryBtn} to={`/me?${contractsQuery}`}>내 계약 보기</Link>
             <button
-              className={styles.primaryBtn}
+              className={styles.ghostBtn}
               onClick={() => navigate('/rooms')}
             >
               방 목록으로
