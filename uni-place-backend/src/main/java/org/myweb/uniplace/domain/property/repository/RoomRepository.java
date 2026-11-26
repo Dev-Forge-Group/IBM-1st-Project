@@ -3,6 +3,9 @@ package org.myweb.uniplace.domain.property.repository;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
+
+import jakarta.persistence.LockModeType;
 
 import org.myweb.uniplace.domain.property.domain.entity.Room;
 import org.myweb.uniplace.domain.property.domain.enums.PetAllowedYn;
@@ -19,6 +22,10 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface RoomRepository extends JpaRepository<Room, Integer>, JpaSpecificationExecutor<Room> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from Room r where r.roomId = :roomId")
+    Optional<Room> findByIdForContractApplication(@Param("roomId") Integer roomId);
 
     List<Room> findAllByBuilding_BuildingIdAndDeleteYn(Integer buildingId, String deleteYn);
 

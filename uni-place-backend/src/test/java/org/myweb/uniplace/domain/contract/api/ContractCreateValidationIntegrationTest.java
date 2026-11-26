@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -44,6 +45,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.AfterAll;
@@ -87,6 +95,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import org.testcontainers.containers.MySQLContainer;
@@ -303,6 +312,98 @@ class ContractCreateValidationIntegrationTest {
         Snapshot before = snapshot();
         assertError(post(form("15", SIGNATURE_PNG, "synthetic-signature.png"), ownerToken()), ErrorCode.CONTRACT_OVERLAP);
         assertNoEffects(before);
+    }
+
+    @Test
+    void overlappingApplicationsWithTwoExistingSnapshotsCommitExactlyOneContract() throws Exception {
+        String other = new TransactionTemplate(transactions).execute(status ->
+                user(users, "second-contract-applicant-" + fixture.roomId()).getUserId());
+        Snapshot before = snapshot();
+        ContractCreateRequest secondRequest = directRequest(15, signature());
+        secondRequest.setContractStart(fixture.start().plusDays(1));
+        secondRequest.setContractEnd(fixture.end().plusDays(1));
+        CyclicBarrier snapshots = new CyclicBarrier(2);
+        var workers = Executors.newFixedThreadPool(2);
+        try {
+            var first = workers.submit(() -> createFromSnapshot(fixture.ownerId(), directRequest(15, signature()), snapshots));
+            var second = workers.submit(() -> createFromSnapshot(other, secondRequest, snapshots));
+            var outcomes = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+            assertThat(outcomes).filteredOn(outcome -> outcome.contractId() != null).hasSize(1);
+            assertThat(outcomes).filteredOn(outcome -> outcome.error() == ErrorCode.CONTRACT_OVERLAP).hasSize(1);
+        } finally {
+            workers.shutdownNow();
+            assertThat(workers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+        assertThat(snapshot().contracts()).isEqualTo(before.contracts() + 1);
+        assertThat(snapshot().files()).isEqualTo(before.files() + 2);
+        verify(storage, times(1)).store(any(MultipartFile.class), anyString(), anyString());
+        verify(images, times(1)).generateAndSave(any(Contract.class));
+        verify(slack, times(1)).send(anyString());
+    }
+
+    @Test
+    void differentRoomsCanCommitWhileTheFirstApplicationIsStillSavingItsSignature() throws Exception {
+        int secondRoom = new TransactionTemplate(transactions).execute(status ->
+                room(rooms, rooms.findById(fixture.roomId()).orElseThrow().getBuilding(), 902).getRoomId());
+        ContractCreateRequest secondRequest = directRequest(15, signature());
+        secondRequest.setRoomId(secondRoom);
+        AtomicBoolean firstStore = new AtomicBoolean(true);
+        CountDownLatch saving = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        doAnswer(ignored -> {
+            if (firstStore.compareAndSet(true, false)) {
+                saving.countDown();
+                assertThat(release.await(20, TimeUnit.SECONDS)).isTrue();
+            }
+            return null;
+        }).when(storage).store(any(MultipartFile.class), anyString(), anyString());
+        var workers = Executors.newFixedThreadPool(2);
+        try {
+            var first = workers.submit(() -> createAs(fixture.ownerId(), directRequest(15, signature())));
+            assertThat(saving.await(10, TimeUnit.SECONDS)).isTrue();
+            var second = workers.submit(() -> createAs(fixture.ownerId(), secondRequest));
+            assertThat(second.get(10, TimeUnit.SECONDS)).isPositive();
+            assertThat(first.isDone()).isFalse();
+            release.countDown();
+            assertThat(first.get(10, TimeUnit.SECONDS)).isPositive();
+        } finally {
+            release.countDown();
+            workers.shutdownNow();
+            assertThat(workers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+        verify(slack, times(2)).send(anyString());
+    }
+
+    private ContractAttempt createFromSnapshot(String userId, ContractCreateRequest request, CyclicBarrier snapshots) {
+        TransactionTemplate transaction = new TransactionTemplate(transactions);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        try {
+            Integer contractId = transaction.execute(status -> {
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM contract WHERE room_id=?", Integer.class,
+                        fixture.roomId())).isZero();
+                try {
+                    snapshots.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted before the caller snapshots were ready", failure);
+                } catch (BrokenBarrierException | TimeoutException failure) {
+                    throw new IllegalStateException("Both callers must open their snapshots before applying", failure);
+                }
+                return createAs(userId, request);
+            });
+            return new ContractAttempt(contractId, null);
+        } catch (BusinessException failure) {
+            return new ContractAttempt(null, failure.getErrorCode());
+        }
+    }
+
+    private int createAs(String userId, ContractCreateRequest request) {
+        SecurityContextHolder.getContext().setAuthentication(jwt.getAuthentication(jwt.createAccessToken(userId, "user")));
+        try {
+            return service.createContract(request).getContractId();
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
     }
 
     @Test
@@ -551,7 +652,11 @@ class ContractCreateValidationIntegrationTest {
     }
 
     private static Room room(RoomRepository rooms, Building building) {
-        return rooms.saveAndFlush(Room.builder().building(building).roomNo(901).floor(1).roomSize(new BigDecimal("20.00"))
+        return room(rooms, building, 901);
+    }
+
+    private static Room room(RoomRepository rooms, Building building, int roomNo) {
+        return rooms.saveAndFlush(Room.builder().building(building).roomNo(roomNo).floor(1).roomSize(new BigDecimal("20.00"))
                 .rentPrice(new BigDecimal("500000")).deposit(new BigDecimal("1000000"))
                 .manageFee(new BigDecimal("50000")).rentMin(1).roomSt(RoomStatus.available).build());
     }
@@ -576,6 +681,7 @@ class ContractCreateValidationIntegrationTest {
     }
 
     private record Fixture(String ownerId, int roomId, LocalDate start, LocalDate end) {}
+    private record ContractAttempt(Integer contractId, ErrorCode error) {}
     private record Snapshot(long contracts, long files, long residents, long notifications, String roomState, String role) {}
     private record Multipart(byte[] body, String contentType) {}
     private record Reply(int status, byte[] body) {}

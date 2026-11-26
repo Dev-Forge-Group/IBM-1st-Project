@@ -37,6 +37,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -75,6 +76,7 @@ public class ContractServiceImpl implements ContractService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ContractResponse createContract(ContractCreateRequest request) {
         String userId = currentUserId();
         validateCreateInputs(request);
@@ -83,19 +85,17 @@ public class ContractServiceImpl implements ContractService {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
-        Room room = roomRepository.findById(request.getRoomId())
+        Room room = roomRepository.findByIdForContractApplication(request.getRoomId())
             .orElseThrow(() -> new BusinessException(ErrorCode.ROOM_NOT_FOUND));
 
         if (room.isDeleted()) throw new BusinessException(ErrorCode.ROOM_NOT_FOUND);
         ownershipAccess.requireVerifiedRentalRoom(room.getRoomId());
 
-        boolean roomOverlapped = contractRepository.existsOverlappedContract(
-            room.getRoomId(),
-            request.getContractStart(),
-            request.getContractEnd(),
-            List.of(ContractStatus.requested, ContractStatus.approved, ContractStatus.active)
-        );
-        if (roomOverlapped) throw new BusinessException(ErrorCode.CONTRACT_OVERLAP);
+        // An existing caller transaction can already have a repeatable-read snapshot.
+        if (contractRepository.findApplicationConflictForUpdate(
+                room.getRoomId(), request.getContractStart(), request.getContractEnd()).isPresent()) {
+            throw new BusinessException(ErrorCode.CONTRACT_OVERLAP);
+        }
 
         Contract contract = Contract.builder()
             .user(user)

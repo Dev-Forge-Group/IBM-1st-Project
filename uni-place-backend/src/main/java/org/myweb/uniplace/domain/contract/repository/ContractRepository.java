@@ -73,6 +73,17 @@ public interface ContractRepository extends JpaRepository<Contract, Integer>, Jp
         return existsOverlappedContract(roomId, startDt, endDt, Arrays.asList(status1, status2));
     }
 
+    @Query(value = """
+        SELECT contract_id
+        FROM contract
+        WHERE room_id = :roomId
+          AND contract_st IN ('requested', 'approved', 'active')
+          AND contract_start < :endDt AND contract_end > :startDt
+        LIMIT 1 FOR UPDATE
+        """, nativeQuery = true)
+    Optional<Integer> findApplicationConflictForUpdate(
+            @Param("roomId") Integer roomId, @Param("startDt") LocalDate startDt, @Param("endDt") LocalDate endDt);
+
     @Query("""
         select count(c) > 0
           from Contract c
